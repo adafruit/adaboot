@@ -67,7 +67,7 @@ tests:
       - nrf52840dongle/nrf52840
     extra_args:
       - EXTRA_CONF_FILE="usb_cdc_acm_recovery.conf"
-      - EXTRA_DTC_OVERLAY_FILE="usb_cdc_acm.overlay"
+      - EXTRA_DTC_OVERLAY_FILE="./boards/nrf52840dongle_nrf52840_big.overlay;usb_cdc_acm.overlay"
       - FILE_SUFFIX="usb_cdc_acm"
     extra_configs:
       - CONFIG_DEPRECATION_TEST=y

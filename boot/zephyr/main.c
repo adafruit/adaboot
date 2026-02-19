@@ -65,6 +65,18 @@ const struct boot_uart_funcs boot_funcs = {
 #include <zephyr/usb/class/usb_dfu.h>
 #endif
 
+#ifdef CONFIG_USB_DEVICE_STACK_NEXT
+#include <zephyr/usb/usbd.h>
+#endif /* CONFIG_USB_DEVICE_STACK_NEXT */
+
+#ifdef CONFIG_BOOT_SERIAL_CDC_ACM
+#include "usbd_cdc_serial.h"
+#endif /* CONFIG_BOOT_SERIAL_CDC_ACM */
+
+#if defined(CONFIG_BOOT_SERIAL_UART) && defined(CONFIG_LOG_BACKEND_UART)
+#error "UART serial recovery and UART log backend cannot both be enabled"
+#endif
+
 #if CONFIG_MCUBOOT_CLEANUP_ARM_CORE
 #include <arm_cleanup.h>
 #endif
