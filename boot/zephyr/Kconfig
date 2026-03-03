@@ -1100,6 +1100,7 @@ config BOOT_USB_DFU_NO_APPLICATION
 endif # BOOT_USB_DFU
 
 rsource "Kconfig.serial_recovery"
+rsource "Kconfig.uf2"
 
 config MCUBOOT_INDICATION_LED
 	bool "Turns on LED indication when device is in DFU"

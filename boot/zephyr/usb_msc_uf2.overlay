@@ -1,0 +1,17 @@
+/*
+ * Sample device tree overlay for enabling USB Mass Storage for UF2.
+ *
+ * Adjust the USB controller node and status for your specific board.
+ * Many boards already have USB enabled by default; this overlay is
+ * provided as a starting point.
+ *
+ * Usage:
+ *   west build -b <board> boot/zephyr -- \
+ *     -DEXTRA_CONF_FILE=uf2.conf \
+ *     -DDTC_OVERLAY_FILE=usb_msc_uf2.overlay
+ */
+
+/* Enable USB controller if not already enabled */
+&usbd {
+	status = "okay";
+};
