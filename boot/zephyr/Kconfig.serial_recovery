@@ -282,6 +282,25 @@ config BOOT_SERIAL_PIN_RESET
 	  Checks if the module reset was caused by the reset pin and will
 	  remain in bootloader serial recovery mode if it was.
 
+config BOOT_SERIAL_DOUBLE_TAP
+	bool "Double tap reset detection"
+	depends on RETENTION_BOOT_MODE
+	help
+	  Detect a double tap of the reset button to enter serial recovery
+	  mode. Uses the retention boot mode subsystem to detect if the
+	  device was reset twice in quick succession. Optionally checks
+	  the boot button during the wait period if GPIO entrance is
+	  configured.
+
+config BOOT_SERIAL_DOUBLE_TAP_DELAY
+	int "Double tap detection window [ms]"
+	default 500
+	depends on BOOT_SERIAL_DOUBLE_TAP
+	help
+	  Time in milliseconds to wait after boot before clearing the
+	  retention flag. If the device is reset within this window,
+	  it will enter serial recovery mode on the next boot.
+
 endmenu
 
 config BOOT_SERIAL_IMG_GRP_HASH
