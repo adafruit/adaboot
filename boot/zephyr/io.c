@@ -36,7 +36,8 @@ BOOT_LOG_MODULE_DECLARE(mcuboot);
 #include <zephyr/drivers/hwinfo.h>
 #endif
 
-#if defined(CONFIG_BOOT_SERIAL_BOOT_MODE) || defined(CONFIG_BOOT_FIRMWARE_LOADER_BOOT_MODE)
+#if defined(CONFIG_BOOT_SERIAL_BOOT_MODE) || defined(CONFIG_BOOT_FIRMWARE_LOADER_BOOT_MODE) || \
+    defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP)
 #include <zephyr/retention/bootmode.h>
 #endif
 
@@ -46,7 +47,8 @@ BOOT_LOG_MODULE_DECLARE(mcuboot);
     !defined(CONFIG_BOOT_SERIAL_WAIT_FOR_DFU) && \
     !defined(CONFIG_BOOT_SERIAL_BOOT_MODE) && \
     !defined(CONFIG_BOOT_SERIAL_NO_APPLICATION) && \
-    !defined(CONFIG_BOOT_SERIAL_PIN_RESET)
+    !defined(CONFIG_BOOT_SERIAL_PIN_RESET) && \
+    !defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP)
 #error "Serial recovery selected without an entrance mode set"
 #endif
 #endif
@@ -213,6 +215,47 @@ bool io_detect_boot_mode(void)
         return true;
     }
 
+    return false;
+}
+#endif
+
+#if defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP)
+bool io_detect_double_tap(void)
+{
+    /* Check if the boot mode flag was already set from a previous boot */
+    if (bootmode_check(BOOT_MODE_TYPE_BOOTLOADER) == 1) {
+        bootmode_clear();
+        return true;
+    }
+
+    /* Set the flag — if we reset during the wait window, next boot detects it */
+    bootmode_set(BOOT_MODE_TYPE_BOOTLOADER);
+
+    int64_t start = k_uptime_get();
+
+#if defined(CONFIG_BOOT_SERIAL_ENTRANCE_GPIO) || defined(CONFIG_BOOT_USB_DFU_GPIO) || \
+    defined(CONFIG_BOOT_FIRMWARE_LOADER_ENTRANCE_GPIO)
+    gpio_pin_configure_dt(&button0, GPIO_INPUT);
+#endif
+
+    while ((k_uptime_get() - start) < CONFIG_BOOT_SERIAL_DOUBLE_TAP_DELAY) {
+/* Check boot button if GPIO entrance is configured (button0 is available) */
+#if defined(CONFIG_BOOT_SERIAL_ENTRANCE_GPIO) || defined(CONFIG_BOOT_USB_DFU_GPIO) || \
+    defined(CONFIG_BOOT_FIRMWARE_LOADER_ENTRANCE_GPIO)
+        if (gpio_pin_get_dt(&button0) > 0) {
+            bootmode_clear();
+            return true;
+        }
+#endif
+#ifdef CONFIG_MULTITHREADING
+        k_sleep(K_MSEC(1));
+#else
+        k_busy_wait(1000);
+#endif
+    }
+
+    /* Timeout expired, no double tap or button press */
+    bootmode_clear();
     return false;
 }
 #endif

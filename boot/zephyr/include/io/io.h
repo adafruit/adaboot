@@ -62,6 +62,14 @@ bool io_detect_pin_reset(void);
  */
 bool io_detect_boot_mode(void);
 
+/*
+ * Checks for double tap of the reset button using the retention subsystem.
+ * Optionally checks boot button during wait period if GPIO entrance is configured.
+ *
+ * @retval	false for normal boot, true for serial recovery boot
+ */
+bool io_detect_double_tap(void);
+
 #ifdef CONFIG_SOC_FAMILY_NORDIC_NRF
 static inline bool io_boot_skip_serial_recovery()
 {
