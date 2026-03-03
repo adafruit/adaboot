@@ -30,6 +30,7 @@ import click
 import imgtool.keys as keys
 from imgtool import image, imgtool_version
 from imgtool.dumpinfo import dump_imginfo
+from imgtool.uf2conv import bin_to_uf2
 from imgtool.version import decode_version
 
 from .keys import ECDSAUsageError, Ed25519UsageError, RSAUsageError, X25519UsageError
@@ -663,6 +664,30 @@ def sign(key, public_key_format, align, version, pad_sig, header_size,
         save_signature(sig_out, new_signature)
 
 
+@click.argument('outfile')
+@click.argument('infile')
+@click.option('-b', '--base-addr', type=BasedIntParamType(), required=True,
+              help='Target base address for the image in flash.')
+@click.option('-f', '--family-id', type=BasedIntParamType(), default=0,
+              help='UF2 family ID (default: 0, accept any).')
+@click.option('-p', '--payload-size', type=int, default=256,
+              help='Bytes of payload per UF2 block (default: 256).')
+@click.command(help='Convert a binary image (e.g. signed MCUboot image) to UF2 format')
+def uf2(infile, outfile, base_addr, family_id, payload_size):
+    with open(infile, 'rb') as f:
+        data = f.read()
+
+    uf2_data = bin_to_uf2(data, base_addr, family_id=family_id,
+                          payload_size=payload_size)
+
+    with open(outfile, 'wb') as f:
+        f.write(uf2_data)
+
+    num_blocks = len(uf2_data) // 512
+    print(f"Converted {len(data)} bytes to {num_blocks} UF2 blocks "
+          f"({len(uf2_data)} bytes), base address {base_addr:#010x}")
+
+
 class AliasesGroup(click.Group):
 
     _aliases = {
@@ -703,6 +728,7 @@ imgtool.add_command(verify)
 imgtool.add_command(sign)
 imgtool.add_command(version)
 imgtool.add_command(dumpinfo)
+imgtool.add_command(uf2)
 
 
 if __name__ == '__main__':

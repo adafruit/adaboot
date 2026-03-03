@@ -300,6 +300,18 @@ if(CONFIG_BOOT_USE_TINYCRYPT)
   endif()
 endif()
 
+if(CONFIG_MCUBOOT_UF2)
+  zephyr_sources(
+    ${BOOT_DIR}/zephyr/uf2_disk.c
+    ${BOOT_DIR}/boot_uf2/src/boot_uf2.c
+    ${BOOT_DIR}/boot_uf2/src/ghostfat.c
+  )
+
+  zephyr_include_directories(
+    ${BOOT_DIR}/boot_uf2/include
+  )
+endif()
+
 if(CONFIG_MCUBOOT_SERIAL)
   zephyr_sources(
     ${BOOT_DIR}/zephyr/serial_adapter.c

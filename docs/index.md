@@ -43,6 +43,7 @@ The MCUboot documentation is composed of the following pages:
 - [ECDSA](ecdsa.md) - information about ECDSA signature formats
 - [Custom crypto backend](custom_crypto.md) - plugging in a custom crypto library
 - [Serial Recovery](serial_recovery.md) - MCUmgr as the serial recovery protocol
+- [UF2 Drag-and-Drop Update](uf2.md) - USB Mass Storage firmware update via UF2
 - Usage instructions:
   - [Zephyr](readme-zephyr.md)
   - [Apache Mynewt](readme-mynewt.md)
@@ -75,6 +76,7 @@ You can find additional documentation on the bootloader in the source files.
 For more information, use the following links:
 - [boot/bootutil](https://github.com/mcu-tools/mcuboot/tree/main/boot/bootutil) - The core of the bootloader itself.
 - [boot/boot\_serial](https://github.com/mcu-tools/mcuboot/tree/main/boot/boot_serial) - Support for serial upgrade within the bootloader itself.
+- [boot/boot\_uf2](https://github.com/mcu-tools/mcuboot/tree/main/boot/boot_uf2) - Support for UF2 drag-and-drop update via USB Mass Storage.
 - [boot/zephyr](https://github.com/mcu-tools/mcuboot/tree/main/boot/zephyr) - Port of the bootloader to Zephyr.
 - [boot/mynewt](https://github.com/mcu-tools/mcuboot/tree/main/boot/mynewt) - Bootloader application for Apache Mynewt.
 - [boot/nuttx](https://github.com/mcu-tools/mcuboot/tree/main/boot/nuttx) - Bootloader application and port of MCUboot interfaces for Apache NuttX.

@@ -1,0 +1,86 @@
+# Copyright (c) 2026 Scott Shawcroft for Adafruit Industries
+#
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig MCUBOOT_UF2
+	bool "MCUboot UF2 drag-and-drop update"
+	select USB_DEVICE_STACK
+	select USB_MASS_STORAGE
+	select DISK_ACCESS
+	select REBOOT
+	depends on !BOOT_FIRMWARE_LOADER
+	help
+	  If y, enables UF2 drag-and-drop firmware update mode.
+	  MCUboot presents a USB Mass Storage device; users drag
+	  a .uf2 file onto it to update firmware.
+
+if MCUBOOT_UF2
+
+config MCUBOOT_UF2_FAMILY_ID
+	hex "UF2 family ID"
+	default 0x0
+	help
+	  UF2 family ID to accept. Set to 0 to accept any family.
+	  UF2 blocks with a non-matching family ID will be silently
+	  ignored.
+
+config MCUBOOT_UF2_BOARD_NAME
+	string "Board name shown in INFO_UF2.TXT"
+	default BOARD
+	help
+	  Board name reported in the INFO_UF2.TXT virtual file
+	  on the UF2 mass storage device.
+
+config MCUBOOT_UF2_BOARD_URL
+	string "Board URL for INDEX.HTM redirect"
+	default "https://mcuboot.com"
+	help
+	  URL that INDEX.HTM on the UF2 drive redirects to.
+
+config MCUBOOT_UF2_DISK_NAME
+	string "Disk name for USB Mass Storage"
+	default "UF2"
+	help
+	  Disk name registered with the disk_access subsystem.
+	  Must match CONFIG_MASS_STORAGE_DISK_NAME.
+
+config MCUBOOT_UF2_MAX_BLOCKS
+	int "Maximum number of UF2 blocks"
+	default 4096
+	help
+	  Maximum number of UF2 blocks in a firmware image.
+	  Each block carries 256 bytes, so 4096 blocks = 1 MB.
+	  The block tracking bitmap uses MAX_BLOCKS/8 bytes of RAM.
+
+config MCUBOOT_UF2_VALIDATE_AFTER_WRITE
+	bool "Validate image header after UF2 write completes"
+	default y
+	help
+	  After all UF2 blocks are received, validate the MCUboot
+	  image header in the target slot before rebooting.
+
+menu "Entrance methods"
+
+config MCUBOOT_UF2_ENTRANCE_GPIO
+	bool "Enter UF2 mode via GPIO"
+	depends on GPIO
+	help
+	  Use the same GPIO detection as serial recovery
+	  (io_detect_pin()) to enter UF2 mode instead.
+
+config MCUBOOT_UF2_ENTRANCE_BOOT_MODE
+	bool "Enter UF2 mode via boot mode retention"
+	depends on RETENTION_BOOT_MODE
+	help
+	  Enter UF2 mode when the boot mode retention subsystem
+	  indicates the application requested it.
+
+config MCUBOOT_UF2_NO_APPLICATION
+	bool "Enter UF2 mode if no bootable application"
+	help
+	  If no valid application is found, enter UF2 mode
+	  instead of halting.
+
+endmenu
+
+endif # MCUBOOT_UF2
