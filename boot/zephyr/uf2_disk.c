@@ -12,6 +12,8 @@
 #include <zephyr/drivers/disk.h>
 #include <zephyr/drivers/flash.h>
 #include <zephyr/storage/flash_map.h>
+#include <zephyr/usb/usbd.h>
+#include <zephyr/usb/class/usbd_msc.h>
 
 #include "bootutil/bootutil_log.h"
 #include "boot_uf2/boot_uf2.h"
@@ -61,6 +63,7 @@ static int uf2_flash_read(uint32_t offset, void *data, uint32_t len,
 /* Disk operations */
 static int uf2_disk_access_init(struct disk_info *disk)
 {
+	BOOT_LOG_DBG("uf2_disk: access_init");
 	return 0;
 }
 
@@ -72,6 +75,7 @@ static int uf2_disk_access_status(struct disk_info *disk)
 static int uf2_disk_access_read(struct disk_info *disk, uint8_t *buf,
 				uint32_t sector, uint32_t count)
 {
+	BOOT_LOG_DBG("uf2_disk: read sector=%u count=%u", sector, count);
 	for (uint32_t i = 0; i < count; i++) {
 		ghostfat_read_sector(&uf2_cfg, sector + i,
 				     buf + i * UF2_BLOCK_SIZE);
@@ -82,6 +86,7 @@ static int uf2_disk_access_read(struct disk_info *disk, uint8_t *buf,
 static int uf2_disk_access_write(struct disk_info *disk, const uint8_t *buf,
 				 uint32_t sector, uint32_t count)
 {
+	BOOT_LOG_DBG("uf2_disk: write sector=%u count=%u", sector, count);
 	for (uint32_t i = 0; i < count; i++) {
 		int rc = ghostfat_write_sector(&uf2_cfg, &uf2_state_buf.state,
 					       sector + i,
@@ -145,6 +150,8 @@ int uf2_disk_register(void)
 {
 	int rc;
 	int area_id;
+
+	BOOT_LOG_DBG("uf2_disk: register start");
 
 #ifdef CONFIG_SINGLE_APPLICATION_SLOT
 	/* Single slot: write directly to primary */
@@ -249,4 +256,119 @@ void uf2_disk_close(void)
 		flash_area_close(target_fap);
 		target_fap = NULL;
 	}
+}
+
+/* ── USB next-gen device init ─────────────────────────────────────── */
+
+USBD_DEFINE_MSC_LUN(uf2, CONFIG_MCUBOOT_UF2_DISK_NAME,
+		    "Adafruit", "UF2 Bootloader", "1.0");
+
+USBD_DEVICE_DEFINE(uf2_usbd,
+		   DEVICE_DT_GET(DT_NODELABEL(zephyr_udc0)),
+		   CONFIG_MCUBOOT_UF2_USB_VID,
+		   CONFIG_MCUBOOT_UF2_USB_PID);
+
+USBD_DESC_LANG_DEFINE(uf2_lang);
+USBD_DESC_MANUFACTURER_DEFINE(uf2_mfr, "Adafruit");
+USBD_DESC_PRODUCT_DEFINE(uf2_product, CONFIG_MCUBOOT_UF2_BOARD_NAME);
+
+USBD_DESC_CONFIG_DEFINE(uf2_fs_cfg, "FS Configuration");
+USBD_DESC_CONFIG_DEFINE(uf2_hs_cfg, "HS Configuration");
+
+USBD_CONFIGURATION_DEFINE(uf2_fs_config,
+			  USB_SCD_SELF_POWERED,
+			  250, &uf2_fs_cfg);
+
+USBD_CONFIGURATION_DEFINE(uf2_hs_config,
+			  USB_SCD_SELF_POWERED,
+			  250, &uf2_hs_cfg);
+
+static int uf2_register_msc(struct usbd_context *const uds_ctx,
+			    const enum usbd_speed speed)
+{
+	struct usbd_config_node *cfg_nd;
+	int err;
+
+	if (speed == USBD_SPEED_HS) {
+		cfg_nd = &uf2_hs_config;
+	} else {
+		cfg_nd = &uf2_fs_config;
+	}
+
+	err = usbd_add_configuration(uds_ctx, speed, cfg_nd);
+	if (err) {
+		BOOT_LOG_ERR("Failed to add USB configuration: %d", err);
+		return err;
+	}
+
+	err = usbd_register_class(&uf2_usbd, "msc_0", speed, 1);
+	if (err) {
+		BOOT_LOG_ERR("Failed to register MSC class: %d", err);
+		return err;
+	}
+
+	BOOT_LOG_DBG("uf2_usb: MSC registered for speed %d", speed);
+	return 0;
+}
+
+int uf2_usb_init(void)
+{
+	int err;
+
+	BOOT_LOG_DBG("uf2_usb: init start");
+
+	err = usbd_add_descriptor(&uf2_usbd, &uf2_lang);
+	if (err) {
+		BOOT_LOG_ERR("Failed to add lang descriptor: %d", err);
+		return err;
+	}
+
+	err = usbd_add_descriptor(&uf2_usbd, &uf2_mfr);
+	if (err) {
+		BOOT_LOG_ERR("Failed to add mfr descriptor: %d", err);
+		return err;
+	}
+
+	err = usbd_add_descriptor(&uf2_usbd, &uf2_product);
+	if (err) {
+		BOOT_LOG_ERR("Failed to add product descriptor: %d", err);
+		return err;
+	}
+
+	BOOT_LOG_DBG("uf2_usb: descriptors added, speed caps=0x%x",
+		     usbd_caps_speed(&uf2_usbd));
+
+	if (USBD_SUPPORTS_HIGH_SPEED &&
+	    usbd_caps_speed(&uf2_usbd) == USBD_SPEED_HS) {
+		BOOT_LOG_DBG("uf2_usb: registering HS MSC");
+		err = uf2_register_msc(&uf2_usbd, USBD_SPEED_HS);
+		if (err) {
+			return err;
+		}
+	}
+
+	BOOT_LOG_DBG("uf2_usb: registering FS MSC");
+	err = uf2_register_msc(&uf2_usbd, USBD_SPEED_FS);
+	if (err) {
+		return err;
+	}
+
+	BOOT_LOG_DBG("uf2_usb: calling usbd_init");
+	err = usbd_init(&uf2_usbd);
+	if (err) {
+		BOOT_LOG_ERR("Failed to init USB device: %d", err);
+		return err;
+	}
+
+	BOOT_LOG_DBG("uf2_usb: calling usbd_enable");
+	err = usbd_enable(&uf2_usbd);
+	if (err) {
+		BOOT_LOG_ERR("Failed to enable USB device: %d", err);
+		return err;
+	}
+
+	BOOT_LOG_INF("USB MSC initialized (VID=0x%04x PID=0x%04x)",
+		     CONFIG_MCUBOOT_UF2_USB_VID, CONFIG_MCUBOOT_UF2_USB_PID);
+
+	return 0;
 }

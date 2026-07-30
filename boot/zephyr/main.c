@@ -177,6 +177,13 @@ static void boot_uf2_enter(void)
         return;
     }
 
+    rc = uf2_usb_init();
+    if (rc != 0) {
+        BOOT_LOG_ERR("Failed to init USB: %d", rc);
+        uf2_disk_close();
+        return;
+    }
+
     BOOT_LOG_INF("UF2 drive active, waiting for firmware...");
 
     /* Poll until all UF2 blocks have been received */
