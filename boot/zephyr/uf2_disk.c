@@ -198,7 +198,7 @@ int uf2_disk_register(void)
 		if (rc == 0) {
 			uintptr_t flash_base_addr;
 
-			flash_device_base(primary_fap->fa_device_id,
+			flash_device_base(flash_area_get_device_id(primary_fap),
 					  &flash_base_addr);
 
 			uf2_cfg.read = uf2_flash_read;

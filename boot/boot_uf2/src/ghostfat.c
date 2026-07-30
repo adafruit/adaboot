@@ -11,6 +11,7 @@
  */
 
 #include <string.h>
+#include <stdio.h>
 #include "boot_uf2/boot_uf2.h"
 
 #define SECTOR_SIZE         512
