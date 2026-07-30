@@ -75,6 +75,25 @@ config MCUBOOT_UF2_ENTRANCE_BOOT_MODE
 	  Enter UF2 mode when the boot mode retention subsystem
 	  indicates the application requested it.
 
+config MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP
+	bool "Double tap reset detection for UF2"
+	depends on RETENTION_BOOT_MODE
+	help
+	  Detect a double tap of the reset button to enter UF2
+	  mode. Uses the retention boot mode subsystem to detect
+	  if the device was reset twice in quick succession.
+	  Optionally checks the boot button during the wait period
+	  if GPIO entrance is configured.
+
+config MCUBOOT_UF2_DOUBLE_TAP_DELAY
+	int "UF2 double tap detection window [ms]"
+	default 500
+	depends on MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP
+	help
+	  Time in milliseconds to wait after boot before clearing the
+	  retention flag. If the device is reset within this window,
+	  it will enter UF2 mode on the next boot.
+
 config MCUBOOT_UF2_NO_APPLICATION
 	bool "Enter UF2 mode if no bootable application"
 	help

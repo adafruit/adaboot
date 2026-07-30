@@ -42,6 +42,11 @@
 #include <zephyr/sys/reboot.h>
 #endif
 
+#ifdef CONFIG_MCUBOOT_UF2
+#include "uf2/uf2_disk.h"
+#include <zephyr/sys/reboot.h>
+#endif
+
 #if defined(CONFIG_MCUBOOT_UUID_VID) || defined(CONFIG_MCUBOOT_UUID_CID)
 #include "bootutil/mcuboot_uuid.h"
 #endif /* CONFIG_MCUBOOT_UUID_VID || CONFIG_MCUBOOT_UUID_CID */
@@ -157,6 +162,50 @@ void zephyr_boot_log_stop(void)
         * !defined(CONFIG_LOG_PROCESS_THREAD) && !defined(CONFIG_LOG_MODE_MINIMAL)
         */
 
+#if defined(CONFIG_MCUBOOT_UF2_ENTRANCE_GPIO) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_BOOT_MODE) || \
+    defined(CONFIG_MCUBOOT_UF2_NO_APPLICATION)
+static void boot_uf2_enter(void)
+{
+    int rc;
+
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+    io_led_set(1);
+#endif
+
+    BOOT_LOG_INF("Entering UF2 update mode");
+
+    rc = uf2_disk_register();
+    if (rc != 0) {
+        BOOT_LOG_ERR("Failed to register UF2 disk: %d", rc);
+        return;
+    }
+
+    BOOT_LOG_INF("UF2 drive active, waiting for firmware...");
+
+    /* Poll until all UF2 blocks have been received */
+    while (!uf2_disk_is_complete()) {
+        MCUBOOT_WATCHDOG_FEED();
+        k_sleep(K_MSEC(10));
+    }
+
+    BOOT_LOG_INF("UF2 transfer complete");
+
+    uf2_disk_close();
+
+#ifndef CONFIG_SINGLE_APPLICATION_SLOT
+    /* Dual slot: mark secondary image as pending for swap */
+    rc = boot_set_pending(0);
+    if (rc != 0) {
+        BOOT_LOG_ERR("Failed to set pending flag: %d", rc);
+    }
+#endif
+
+    /* Reboot to apply the new image */
+    sys_reboot(SYS_REBOOT_COLD);
+}
+#endif
+
 #if defined(CONFIG_BOOT_SERIAL_ENTRANCE_GPIO) || defined(CONFIG_BOOT_SERIAL_PIN_RESET) \
     || defined(CONFIG_BOOT_SERIAL_BOOT_MODE) || defined(CONFIG_BOOT_SERIAL_NO_APPLICATION) \
     || defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP)
@@ -257,6 +306,14 @@ int main(void)
     }
 #endif
 
+#ifdef CONFIG_MCUBOOT_UF2_ENTRANCE_GPIO
+    BOOT_LOG_DBG("Checking GPIO for UF2 mode");
+    if (io_detect_pin() &&
+            !io_boot_skip_serial_recovery()) {
+        boot_uf2_enter();
+    }
+#endif
+
 #ifdef CONFIG_BOOT_SERIAL_PIN_RESET
     BOOT_LOG_DBG("Checking RESET pin for serial recovery");
     if (io_detect_pin_reset()) {
@@ -268,6 +325,13 @@ int main(void)
     BOOT_LOG_DBG("Checking double tap for serial recovery");
     if (io_detect_double_tap()) {
         boot_serial_enter(0);
+    }
+#endif
+
+#ifdef CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP
+    BOOT_LOG_DBG("Checking double tap for UF2 mode");
+    if (io_detect_double_tap()) {
+        boot_uf2_enter();
     }
 #endif
 
@@ -350,6 +414,13 @@ int main(void)
     }
 #endif
 
+#ifdef CONFIG_MCUBOOT_UF2_ENTRANCE_BOOT_MODE
+    if (io_detect_boot_mode()) {
+        BOOT_LOG_DBG("Entering UF2 mode via boot mode retention");
+        boot_uf2_enter();
+    }
+#endif
+
 #ifdef CONFIG_BOOT_SERIAL_WAIT_FOR_DFU
     timeout_in_ms -= (k_uptime_get_32() - start);
     if( timeout_in_ms <= 0 ) {
@@ -386,6 +457,10 @@ int main(void)
 
         mcuboot_status_change(MCUBOOT_STATUS_NO_BOOTABLE_IMAGE_FOUND);
 
+#ifdef CONFIG_MCUBOOT_UF2_NO_APPLICATION
+        /* No bootable image: enter UF2 mode for drag-and-drop update */
+        boot_uf2_enter();
+#endif
 #ifdef CONFIG_BOOT_SERIAL_NO_APPLICATION
         /* No bootable image and configuration set to remain in serial
          * recovery mode
