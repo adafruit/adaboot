@@ -4,8 +4,8 @@
 
 menuconfig MCUBOOT_UF2
 	bool "MCUboot UF2 drag-and-drop update"
-	select USB_DEVICE_STACK
-	select USB_MASS_STORAGE
+	select USB_DEVICE_STACK_NEXT
+	select USBD_MSC_CLASS
 	select DISK_ACCESS
 	select REBOOT
 	depends on !BOOT_FIRMWARE_LOADER
