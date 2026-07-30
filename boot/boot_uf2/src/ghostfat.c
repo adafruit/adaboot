@@ -13,6 +13,9 @@
 #include <string.h>
 #include <stdio.h>
 #include "boot_uf2/boot_uf2.h"
+#include "bootutil/bootutil_log.h"
+
+BOOT_LOG_MODULE_DECLARE(mcuboot);
 
 #define SECTOR_SIZE         512
 
@@ -24,8 +27,8 @@
 #define NUM_FATS             2
 #define DATA_START_SECTOR   (RESERVED_SECTORS + (NUM_FATS * NUM_FAT_SECTORS) + \
 			     NUM_ROOT_DIR_SECTORS)
-/* Report a ~32 MB disk so hosts don't complain */
-#define TOTAL_SECTORS       65536
+/* Report a ~32 MB disk (max for FAT16 16-bit sector count) */
+#define TOTAL_SECTORS       65535
 
 /* Entries per FAT sector (512 bytes / 2 bytes per FAT16 entry) */
 #define FAT_ENTRIES_PER_SECTOR  (SECTOR_SIZE / 2)
@@ -67,6 +70,8 @@ static void write_u32_le(uint8_t *buf, uint32_t val)
 
 /**
  * Build the BIOS Parameter Block / boot sector (sector 0)
+ * This also includes an MBR partition table so the host sees a
+ * partitioned device with a single FAT16 partition.
  */
 static void build_boot_sector(uint8_t *buf)
 {
@@ -95,7 +100,7 @@ static void build_boot_sector(uint8_t *buf)
 	/* Root directory entries */
 	write_u16_le(&buf[17], ROOT_DIR_ENTRIES);
 
-	/* Total sectors (16-bit) */
+	/* Total sectors (16-bit) — 65535 is max, 65536 wraps to 0 */
 	write_u16_le(&buf[19], TOTAL_SECTORS);
 
 	/* Media descriptor */
@@ -110,7 +115,16 @@ static void build_boot_sector(uint8_t *buf)
 	/* Number of heads */
 	write_u16_le(&buf[26], 1);
 
-	/* Boot signature */
+	/* Hidden sectors (0 for superfloppy) */
+	write_u32_le(&buf[28], 0);
+
+	/* Total sectors (32-bit) — set when 16-bit field is maxed out */
+	write_u32_le(&buf[32], TOTAL_SECTORS);
+
+	/* Drive number */
+	buf[36] = 0x80;
+
+	/* Extended boot signature */
 	buf[38] = 0x29;
 
 	/* Volume serial */
@@ -121,6 +135,23 @@ static void build_boot_sector(uint8_t *buf)
 
 	/* File system type */
 	memcpy(&buf[54], "FAT16   ", 8);
+
+	/* ── MBR partition table at offset 446 (0x1BE) ── */
+	/* Partition 1: type 0x0E (FAT16 LBA), covers entire disk */
+	buf[446] = 0x80; /* bootable */
+	/* CHS start: 0/1/1 */
+	buf[447] = 0x01; /* head */
+	buf[448] = 0x01; /* sector (bits 0-5) + cylinder high bits */
+	buf[449] = 0x00; /* cylinder low */
+	buf[450] = 0x0E; /* FAT16 LBA */
+	/* CHS end: not critical, set to max */
+	buf[451] = 0xFE; /* head */
+	buf[452] = 0xFF; /* sector */
+	buf[453] = 0xFF; /* cylinder */
+	/* LBA start = 0 (partition starts at sector 0) */
+	write_u32_le(&buf[454], 0);
+	/* LBA size = total sectors */
+	write_u32_le(&buf[458], TOTAL_SECTORS);
 
 	/* Boot sector signature */
 	buf[510] = 0x55;
@@ -299,9 +330,16 @@ uint32_t ghostfat_get_sector_count(void)
 	return TOTAL_SECTORS;
 }
 
+static bool ghostfat_read_logged;
+
 void ghostfat_read_sector(const struct uf2_cfg *cfg, uint32_t sector,
 			  uint8_t *buf)
 {
+	if (!ghostfat_read_logged) {
+		BOOT_LOG_DBG("ghostfat: first read at sector=%u", sector);
+		ghostfat_read_logged = true;
+	}
+
 	if (sector == 0) {
 		build_boot_sector(buf);
 		return;
@@ -369,6 +407,8 @@ int ghostfat_write_sector(const struct uf2_cfg *cfg, struct uf2_state *state,
 			  uint32_t sector, const uint8_t *buf,
 			  uint32_t max_blocks)
 {
+	BOOT_LOG_DBG("ghostfat: write sector=%u", sector);
+
 	/* Only inspect data-area writes for UF2 blocks */
 	if (sector < DATA_START_SECTOR) {
 		return 0;

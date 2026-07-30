@@ -24,6 +24,18 @@ config MCUBOOT_UF2_FAMILY_ID
 	  UF2 blocks with a non-matching family ID will be silently
 	  ignored.
 
+config MCUBOOT_UF2_USB_VID
+	hex "USB Vendor ID for UF2 drive"
+	default 0x239A
+	help
+	  USB vendor ID presented by the UF2 bootloader.
+
+config MCUBOOT_UF2_USB_PID
+	hex "USB Product ID for UF2 drive"
+	default 0x002F
+	help
+	  USB product ID presented by the UF2 bootloader.
+
 config MCUBOOT_UF2_BOARD_NAME
 	string "Board name shown in INFO_UF2.TXT"
 	default BOARD

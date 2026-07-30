@@ -36,6 +36,16 @@ bool uf2_disk_is_complete(void);
  */
 void uf2_disk_close(void);
 
+/**
+ * @brief Initialize USB next-gen stack with MSC for UF2.
+ *
+ * Creates the USB device context, adds descriptors and MSC class,
+ * and enables the USB device. Must be called after uf2_disk_register().
+ *
+ * @return 0 on success, negative errno on failure
+ */
+int uf2_usb_init(void);
+
 #ifdef __cplusplus
 }
 #endif
