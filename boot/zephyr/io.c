@@ -37,7 +37,9 @@ BOOT_LOG_MODULE_DECLARE(mcuboot);
 #endif
 
 #if defined(CONFIG_BOOT_SERIAL_BOOT_MODE) || defined(CONFIG_BOOT_FIRMWARE_LOADER_BOOT_MODE) || \
-    defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP)
+    defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_BOOT_MODE) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP)
 #include <zephyr/retention/bootmode.h>
 #endif
 
@@ -98,12 +100,18 @@ void io_led_set(int value)
 #endif /* CONFIG_MCUBOOT_INDICATION_LED */
 
 #if defined(CONFIG_BOOT_SERIAL_ENTRANCE_GPIO) || defined(CONFIG_BOOT_USB_DFU_GPIO) || \
-    defined(CONFIG_BOOT_FIRMWARE_LOADER_ENTRANCE_GPIO)
+    defined(CONFIG_BOOT_FIRMWARE_LOADER_ENTRANCE_GPIO) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_GPIO) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP)
 
 #if defined(CONFIG_MCUBOOT_SERIAL)
 #define BUTTON_0_DETECT_DELAY CONFIG_BOOT_SERIAL_DETECT_DELAY
 #elif defined(CONFIG_BOOT_FIRMWARE_LOADER)
 #define BUTTON_0_DETECT_DELAY CONFIG_BOOT_FIRMWARE_LOADER_DETECT_DELAY
+#elif defined(CONFIG_MCUBOOT_UF2_ENTRANCE_GPIO)
+#define BUTTON_0_DETECT_DELAY 0
+#elif defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP)
+#define BUTTON_0_DETECT_DELAY 0
 #else
 #define BUTTON_0_DETECT_DELAY CONFIG_BOOT_USB_DFU_DETECT_DELAY
 #endif
@@ -121,14 +129,16 @@ bool io_detect_pin(void)
     int rc;
     int pin_active;
 
+    BOOT_LOG_DBG("io_detect_pin: checking button0");
+
     if (!device_is_ready(button0.port)) {
-        BOOT_LOG_DBG("GPIO device is not ready.");
+        BOOT_LOG_DBG("io_detect_pin: GPIO device is not ready.");
         return false;
     }
 
     rc = gpio_pin_configure_dt(&button0, GPIO_INPUT);
     if (rc != 0) {
-        BOOT_LOG_DBG("Failed to initialize boot detect pin.");
+        BOOT_LOG_DBG("io_detect_pin: Failed to init boot detect pin, rc=%d", rc);
         return false;
     }
 
@@ -136,10 +146,11 @@ bool io_detect_pin(void)
     pin_active = rc;
 
     if (rc < 0) {
-        BOOT_LOG_DBG("Failed to read boot detect pin.");
+        BOOT_LOG_DBG("io_detect_pin: Failed to read boot detect pin, rc=%d", rc);
         return false;
     }
 
+    BOOT_LOG_DBG("io_detect_pin: initial read = %d", pin_active);
 
     if (pin_active) {
         if (BUTTON_0_DETECT_DELAY > 0) {
@@ -178,6 +189,7 @@ bool io_detect_pin(void)
         }
     }
 
+    BOOT_LOG_DBG("io_detect_pin: final result = %d", pin_active);
     return (bool)pin_active;
 }
 #endif
@@ -199,50 +211,85 @@ bool io_detect_pin_reset(void)
 }
 #endif
 
-#if defined(CONFIG_BOOT_SERIAL_BOOT_MODE) || defined(CONFIG_BOOT_FIRMWARE_LOADER_BOOT_MODE)
+#if defined(CONFIG_BOOT_SERIAL_BOOT_MODE) || defined(CONFIG_BOOT_FIRMWARE_LOADER_BOOT_MODE) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_BOOT_MODE)
 bool io_detect_boot_mode(void)
 {
     int32_t boot_mode;
 
     boot_mode = bootmode_check(BOOT_MODE_TYPE_BOOTLOADER);
+    BOOT_LOG_DBG("io_detect_boot_mode: bootmode_check returned %d", (int)boot_mode);
 
     if (boot_mode == 1) {
         /* Boot mode to stay in bootloader, clear status and enter serial
          * recovery mode
          */
+        BOOT_LOG_DBG("io_detect_boot_mode: boot mode flag set, clearing and entering");
         bootmode_clear();
 
         return true;
     }
 
+    BOOT_LOG_DBG("io_detect_boot_mode: no boot mode flag");
     return false;
 }
 #endif
 
-#if defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP)
+#if defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP) || defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP)
+
+#if defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP)
+#define DOUBLE_TAP_DELAY_MS CONFIG_MCUBOOT_UF2_DOUBLE_TAP_DELAY
+#else
+#define DOUBLE_TAP_DELAY_MS CONFIG_BOOT_SERIAL_DOUBLE_TAP_DELAY
+#endif
+
 bool io_detect_double_tap(void)
 {
+    BOOT_LOG_DBG("io_detect_double_tap: checking");
+
+#if defined(CONFIG_BOOT_SERIAL_ENTRANCE_GPIO) || defined(CONFIG_BOOT_USB_DFU_GPIO) || \
+    defined(CONFIG_BOOT_FIRMWARE_LOADER_ENTRANCE_GPIO) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_GPIO) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP)
+    /* Check GPIO button immediately — no delay for button-hold entrance */
+    if (device_is_ready(button0.port)) {
+        gpio_pin_configure_dt(&button0, GPIO_INPUT);
+        if (gpio_pin_get_dt(&button0) > 0) {
+            BOOT_LOG_DBG("io_detect_double_tap: GPIO button held, entering");
+            return true;
+        }
+    }
+#endif
+
     /* Check if the boot mode flag was already set from a previous boot */
     if (bootmode_check(BOOT_MODE_TYPE_BOOTLOADER) == 1) {
+        BOOT_LOG_DBG("io_detect_double_tap: double tap detected (flag was set)");
         bootmode_clear();
         return true;
     }
 
     /* Set the flag — if we reset during the wait window, next boot detects it */
+    BOOT_LOG_DBG("io_detect_double_tap: setting flag, waiting %d ms",
+                 DOUBLE_TAP_DELAY_MS);
     bootmode_set(BOOT_MODE_TYPE_BOOTLOADER);
 
     int64_t start = k_uptime_get();
 
 #if defined(CONFIG_BOOT_SERIAL_ENTRANCE_GPIO) || defined(CONFIG_BOOT_USB_DFU_GPIO) || \
-    defined(CONFIG_BOOT_FIRMWARE_LOADER_ENTRANCE_GPIO)
+    defined(CONFIG_BOOT_FIRMWARE_LOADER_ENTRANCE_GPIO) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_GPIO) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP)
+    /* Re-configure after bootmode_set may have changed pin state */
     gpio_pin_configure_dt(&button0, GPIO_INPUT);
 #endif
 
-    while ((k_uptime_get() - start) < CONFIG_BOOT_SERIAL_DOUBLE_TAP_DELAY) {
-/* Check boot button if GPIO entrance is configured (button0 is available) */
+    while ((k_uptime_get() - start) < DOUBLE_TAP_DELAY_MS) {
 #if defined(CONFIG_BOOT_SERIAL_ENTRANCE_GPIO) || defined(CONFIG_BOOT_USB_DFU_GPIO) || \
-    defined(CONFIG_BOOT_FIRMWARE_LOADER_ENTRANCE_GPIO)
+    defined(CONFIG_BOOT_FIRMWARE_LOADER_ENTRANCE_GPIO) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_GPIO) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP)
         if (gpio_pin_get_dt(&button0) > 0) {
+            BOOT_LOG_DBG("io_detect_double_tap: button pressed during window");
             bootmode_clear();
             return true;
         }
@@ -255,6 +302,7 @@ bool io_detect_double_tap(void)
     }
 
     /* Timeout expired, no double tap or button press */
+    BOOT_LOG_DBG("io_detect_double_tap: timeout, no double tap");
     bootmode_clear();
     return false;
 }
