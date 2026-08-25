@@ -1,4 +1,20 @@
-/* Delete the storage partition so we can replace it with nvm + filesystem. */
+/* FRDM-RW612 mcuboot layout.
+ *
+ * Upstream (frdm_rw612_common.dtsi) partitions the 64 MB w25q512jvfiq as:
+ *   boot_partition   @0x000000  128K   (mcuboot)
+ *   slot0_partition  @0x020000  3M
+ *   slot1_partition  @0x320000  3M
+ *   storage_partition@0x620000  58M-128K  (to end of flash)
+ *
+ * mcuboot and both slots are kept as-is. The single large upstream storage
+ * partition is replaced with the fork's standard trio so every app gets the
+ * same placement: a small settings partition, raw nvm, and the filesystem
+ * filling the rest. storage_partition must exist -- Zephyr's settings
+ * subsystem (settings_nvs.c) references it by name.
+ *
+ * Sector size is 4 KB; all offsets and sizes below are 4 KB aligned and the
+ * filesystem ends exactly at the 64 MB flash boundary.
+ */
 &w25q512jvfiq {
 	partitions {
 		/delete-node/ partition@620000;
@@ -14,14 +30,22 @@
 &w25q512jvfiq {
 	partitions {
 
-		nvm_partition: partition@620000 {
-			label = "nvm";
-			reg = <0x620000 DT_SIZE_K(4)>;
+		storage_partition: partition@620000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x620000 DT_SIZE_K(32)>;
 		};
 
-		filesystem_partition: partition@621000 {
+		nvm_partition: partition@628000 {
+			compatible = "zephyr,mapped-partition";
+			label = "nvm";
+			reg = <0x628000 DT_SIZE_K(4)>;
+		};
+
+		filesystem_partition: partition@629000 {
+			compatible = "zephyr,mapped-partition";
 			label = "filesystem";
-			reg = <0x621000 DT_SIZE_K(59260)>;
+			reg = <0x629000 DT_SIZE_K(59228)>;
 		};
 	};
 };
