@@ -1,0 +1,26 @@
+/* Delete the storage partition so we can replace it with nvm + filesystem. */
+&is25wp128 {
+	partitions {
+		/delete-node/ partition@e20000;
+	};
+};
+
+&is25wp128 {
+	partitions {
+
+		storage_partition: partition@e20000 {
+			label = "storage";
+			reg = <0xe20000 DT_SIZE_K(4)>;
+		};
+
+		nvm_partition: partition@e21000 {
+			label = "nvm";
+			reg = <0xe21000 DT_SIZE_K(4)>;
+		};
+
+		filesystem_partition: partition@e22000 {
+			label = "filesystem";
+			reg = <0xe22000 DT_SIZE_K(1912)>;
+		};
+	};
+};

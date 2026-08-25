@@ -1,0 +1,48 @@
+/* RP2040 UF2-native layout (no mcuboot): applied to the application image only.
+ *
+ * RP2040 boots from its own second-stage bootloader (UF2), so there is no
+ * mcuboot domain. The fork still owns this layout so CircuitPython, Arduino,
+ * and Wippersnapper share the same code/nvm/storage/filesystem placement.
+ * Flash is 8 MB on the Adafruit Feather RP2040.
+ */
+&flash0 {
+	/delete-node/ partitions;
+
+	partitions {
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* Reserved memory for the second stage bootloader */
+		second_stage_bootloader: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "second_stage_bootloader";
+			reg = <0x00000000 0x100>;
+			read-only;
+		};
+
+		code_partition: partition@100 {
+			compatible = "zephyr,mapped-partition";
+			label = "code-partition";
+			reg = <0x100 (0x180000 - 0x100)>;
+			read-only;
+		};
+
+		nvm_partition: partition@180000 {
+			compatible = "zephyr,mapped-partition";
+			label = "nvm";
+			reg = <0x180000 0x800>;
+		};
+
+		storage_partition: partition@180800 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x180800 0x800>;
+		};
+
+		filesystem_partition: partition@181000 {
+			compatible = "zephyr,mapped-partition";
+			label = "filesystem";
+			reg = <0x181000 (DT_SIZE_M(8) - 0x181000)>;
+		};
+	};
+};

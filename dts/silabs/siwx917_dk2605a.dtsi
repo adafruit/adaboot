@@ -1,0 +1,25 @@
+/* SiWG917 standalone layout (no mcuboot): applied to the application image only.
+ *
+ * The SiWG917 has no USB device controller (no UF2), so there is no mcuboot
+ * domain. The fork still owns this layout so apps share code/filesystem
+ * placement. The whole 8 MB is already partitioned by siwg917m111mgtba.dtsi
+ * with no unallocated space; the upper region is owned by the network processor
+ * (M4 cannot write there), so the filesystem is carved out of the M4's own
+ * code_partition (shrunk from 2008K to 1M). These two partitions are appended
+ * to the existing flash0 partitions node.
+ */
+&flash0 {
+	partitions {
+		code_partition: partition@202000 {
+			compatible = "zephyr,mapped-partition";
+			label = "code_partition";
+			reg = <0x00202000 0x00100000>;
+		};
+
+		filesystem_partition: partition@302000 {
+			compatible = "zephyr,mapped-partition";
+			label = "filesystem";
+			reg = <0x00302000 0x000f6000>;
+		};
+	};
+};

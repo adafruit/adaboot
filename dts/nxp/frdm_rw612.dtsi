@@ -1,0 +1,27 @@
+/* Delete the storage partition so we can replace it with nvm + filesystem. */
+&w25q512jvfiq {
+	partitions {
+		/delete-node/ partition@620000;
+	};
+};
+
+/ {
+	aliases {
+		mcuboot-button0 = &user_button_0;
+	};
+};
+
+&w25q512jvfiq {
+	partitions {
+
+		nvm_partition: partition@620000 {
+			label = "nvm";
+			reg = <0x620000 DT_SIZE_K(4)>;
+		};
+
+		filesystem_partition: partition@621000 {
+			label = "filesystem";
+			reg = <0x621000 DT_SIZE_K(59260)>;
+		};
+	};
+};
