@@ -1,0 +1,40 @@
+/* RP2350 UF2-native layout (no mcuboot): applied to the application image only.
+ *
+ * RP2350 boots from its own second-stage bootloader (UF2), so there is no
+ * mcuboot domain. The fork still owns this layout so CircuitPython, Arduino,
+ * and Wippersnapper share the same code/nvm/storage/filesystem placement.
+ * Flash is 4 MB on the Raspberry Pi Pico 2. RP2350 has no separate
+ * second_stage_bootloader partition (the bootloader lives below 0x0 in the
+ * bootrom), so code starts at 0x0.
+ */
+&flash0 {
+	partitions {
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		code_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "code-partition";
+			reg = <0x0 0x180000>;
+			read-only;
+		};
+
+		nvm_partition: partition@180000 {
+			compatible = "zephyr,mapped-partition";
+			label = "nvm";
+			reg = <0x180000 0x800>;
+		};
+
+		storage_partition: partition@180800 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x180800 0x800>;
+		};
+
+		filesystem_partition: partition@181000 {
+			compatible = "zephyr,mapped-partition";
+			label = "filesystem";
+			reg = <0x181000 (DT_SIZE_M(4) - 0x181000)>;
+		};
+	};
+};

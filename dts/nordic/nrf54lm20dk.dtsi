@@ -1,0 +1,29 @@
+/* nRF54LM20 DK standalone layout (no mcuboot, yet): applied to the application
+ * image only.
+ *
+ * This board does not use mcuboot yet: the application links at 0x0 in
+ * cpuapp_rram (set in the board overlay's chosen zephyr,code-partition) rather
+ * than into slot0_partition. The fork still owns the filesystem layout so it is
+ * shared across apps. The whole 8 MB external MX25R6435F QSPI flash is used for
+ * the filesystem; the device is enabled here so any app consuming this overlay
+ * gets it without board-specific enablement.
+ *
+ * When this board moves to mcuboot, add it to tools/boards.toml, regenerate
+ * dts/mcuboot_boards.cmake (--gen-list), replace this file with a mcuboot
+ * layout (defining mcuboot/slot0/slot1), and drop the zephyr,code-partition =
+ * &cpuapp_rram override in the board overlay.
+ */
+&mx25r64 {
+	status = "okay";
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		filesystem_partition: partition@0 {
+			label = "filesystem";
+			reg = <0x00000000 DT_SIZE_M(8)>;
+		};
+	};
+};

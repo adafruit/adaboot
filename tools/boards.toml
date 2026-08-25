@@ -1,0 +1,89 @@
+# Board registry for the partition layout tool.
+#
+# Each key is the partition key (the Zephyr board name, e.g. "nrf54l15dk") and
+# maps to the canonical Zephyr board id used to run `west build --cmake-only`, plus
+# the vendor so the generated dtsi is written to
+# dts/<vendor>/<board>.dtsi (mirroring the board folder
+# layout). An optional [external_flash] table supplies the erase-block-size for
+# SPI NOR devices that don't expose it in their DTS binding.
+#
+# This is the single list of boards this bootloader fork owns the memory map
+# for. Applications (CircuitPython, Arduino, Wippersnapper) consume the
+# generated dts/<vendor>/<board>.dtsi; they do not maintain
+# their own board list for partitioning.
+
+[boards.da14695_dk_usb]
+board = "da14695_dk_usb"
+vendor = "renesas"
+
+[boards.ek_ra6m5]
+board = "ek_ra6m5"
+vendor = "renesas"
+
+[boards.ek_ra8d1]
+board = "ek_ra8d1"
+vendor = "renesas"
+
+[boards.frdm_mcxn947]
+board = "frdm_mcxn947/mcxn947/cpu0"
+vendor = "nxp"
+
+[boards.frdm_rw612]
+board = "frdm_rw612"
+vendor = "nxp"
+
+[boards.mimxrt1170_evk]
+board = "mimxrt1170_evk@A/mimxrt1176/cm7"
+vendor = "nxp"
+
+[boards.nrf5340dk]
+board = "nrf5340dk/nrf5340/cpuapp"
+vendor = "nordic"
+
+[boards.nrf54h20dk]
+board = "nrf54h20dk/nrf54h20/cpuapp"
+vendor = "nordic"
+
+[boards.nrf54h20dk.external_flash]
+label = "mx25uw63"
+erase_block_size = 4096
+
+[boards.nrf54l15dk]
+board = "nrf54l15dk/nrf54l15/cpuapp"
+vendor = "nordic"
+
+[boards.nrf54l15dk.external_flash]
+label = "mx25r64"
+erase_block_size = 4096
+
+[boards.nrf7002dk]
+board = "nrf7002dk/nrf5340/cpuapp"
+vendor = "nordic"
+
+[boards.nrf7002dk.external_flash]
+label = "mx25r64"
+erase_block_size = 4096
+
+[boards.nucleo_n657x0_q]
+board = "nucleo_n657x0_q/stm32n657xx"
+vendor = "st"
+
+[boards.nucleo_n657x0_q.external_flash]
+label = "mx25um51245g"
+erase_block_size = 4096
+
+[boards.nucleo_u575zi_q]
+board = "nucleo_u575zi_q/stm32u575xx"
+vendor = "st"
+
+[boards.stm32h7b3i_dk]
+board = "stm32h7b3i_dk"
+vendor = "st"
+
+[boards.stm32h7b3i_dk.external_flash]
+label = "mx25lm51245"
+erase_block_size = 4096
+
+[boards.stm32wba65i_dk1]
+board = "stm32wba65i_dk1"
+vendor = "st"
