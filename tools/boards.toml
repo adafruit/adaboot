@@ -5,7 +5,9 @@
 # the vendor so the generated dtsi is written to
 # dts/<vendor>/<board>.dtsi (mirroring the board folder
 # layout). An optional [external_flash] table supplies the erase-block-size for
-# SPI NOR devices that don't expose it in their DTS binding.
+# SPI NOR devices that don't expose it in their DTS binding. An optional
+# mcuboot_mode picks the SB_CONFIG_MCUBOOT_MODE_<mode> the layout was planned
+# for (default "single_app").
 #
 # This is the single list of boards this bootloader fork owns the memory map
 # for. Applications (CircuitPython, Arduino, Wippersnapper) consume the
@@ -67,6 +69,8 @@ erase_block_size = 4096
 [boards.nucleo_n657x0_q]
 board = "nucleo_n657x0_q/stm32n657xx"
 vendor = "st"
+# STM32N6 runs from RAM (no XIP), so mcuboot must copy the image to RAM.
+mcuboot_mode = "ram_load"
 
 [boards.nucleo_n657x0_q.external_flash]
 label = "mx25um51245g"

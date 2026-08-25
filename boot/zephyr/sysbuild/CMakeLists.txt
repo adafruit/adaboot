@@ -4,6 +4,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+# Adaboot fork: apply the board partition layout owned by dts/ to the images in
+# this build. See dts/README.md.
+include(${ZEPHYR_MCUBOOT_MODULE_DIR}/dts/sysbuild.cmake)
+
 function(mathup num align result)
   math(EXPR out "(((${num}) + ((${align}) - 1)) & ~((${align}) - 1))")
   set(${result} "${out}" PARENT_SCOPE)
