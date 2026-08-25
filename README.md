@@ -1,4 +1,26 @@
-# [MCUboot](http://mcuboot.com/)
+# Adaboot
+
+Adaboot is a fork of MCUboot for use in Adafruit supported devices. It is meant
+to bring the same bootloader behavior that exists on
+[SAMD](https://github.com/adafruit/uf2-samdx1),
+[nRF](https://github.com/adafruit/Adafruit_nRF52_Bootloader) and
+[other](https://github.com/adafruit/tinyuf2) Adafruit devices to Zephyr based
+boards:
+* UF2 support on native USB boards
+* Double tap to enter the bootloader (all load methods)
+* A common partitioning scheme shared between CircuitPython, Arduino, WipperSnapper and other Adafruit bootloaders
+  * Bootloader location
+  * slot0 in executable NVM
+  * slot1 if only wireless loading or if non-executable NVM is large
+  * A filesystem partition
+    * FATFS if the board has native USB
+    * littlefs otherwise
+  * A storage partition for zephyr data like BLE bonding keys
+  * A "raw" partition for CircuitPython's raw `nvm` access
+* Prebuilt updater binaries
+* Shared LED status
+
+## [MCUboot](http://mcuboot.com/)
 
 [![Package on PyPI](https://img.shields.io/pypi/v/imgtool.svg)][pypi]
 [![Coverity Scan Build Status](https://scan.coverity.com/projects/12307/badge.svg)][coverity]
