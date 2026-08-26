@@ -151,6 +151,27 @@ make all STOP_ON_ERROR=1       # stop on the first failing board
 make all BOARDS='nrf54l15dk nucleo_u575zi_q'   # build a subset
 ```
 
+## Updater UF2 files
+
+For boards whose bootloader is UF2-capable (a `conf/<key>.conf` that enables
+`CONFIG_MCUBOOT_UF2=y`), the updater can be shipped as a `.uf2` you drag onto
+the bootloader's USB mass-storage drive:
+
+```
+make uf2 BOARD=nrf54lm20dk     # build the updater + emit mcuboot-updater.uf2
+make all-uf2                    # every UF2-capable board (override UF2_BOARDS=...)
+```
+
+`make uf2` runs `make updater` first, then converts the updater's signed image
+to UF2. The UF2 base address is slot0's flash offset (`fa_off` -- the address
+the bootloader writes incoming UF2 blocks at), read from the build's EDT; the
+family ID is the bootloader's `CONFIG_MCUBOOT_UF2_FAMILY_ID`. Both are read
+from the freshly built trees by `tools/uf2_updater.py`. Output:
+
+```
+build-<key>-updater/mcuboot-updater.uf2   (drag onto the UF2 drive)
+```
+
 ## Other targets
 
 ```

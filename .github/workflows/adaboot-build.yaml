@@ -6,12 +6,17 @@
 # tree. Each matrix job sets up a west workspace with the Adafruit Zephyr
 # fork via zephyrproject-rtos/action-zephyr-setup (the same action
 # CircuitPython's zephyr-cp port CI uses, against the same zephyr-config
-# manifest) and then runs `make build` / `make updater`.
+# manifest) and then runs `make build` / `make updater`. Boards whose
+# bootloader is UF2-capable (conf/<key>.conf enables CONFIG_MCUBOOT_UF2=y,
+# listed by `tools/uf2_updater.py list`) additionally get `make uf2` so their
+# updater ships as a .uf2 you can drag onto the bootloader's UF2 drive.
 #
 # Artifacts per board:
 #   mcuboot-<board>/mcuboot.bin                    - the bootloader
 #   updater-<board>/zephyr.signed.bin              - slot0 image that rewrites
 #                                                    the boot partition
+#   uf2-<board>/mcuboot-updater.uf2                - the updater as a UF2 file
+#                                                    (UF2-capable boards only)
 
 name: Build Adaboot
 
@@ -38,6 +43,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.boards.outputs.matrix }}
+      uf2: ${{ steps.boards.outputs.uf2 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -55,6 +61,11 @@ jobs:
           fi
           matrix=$(python3 -c 'import json, sys; print(json.dumps({"board": sys.argv[1:]}))' "${boards[@]}")
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          # UF2-capable boards (conf/<key>.conf enables CONFIG_MCUBOOT_UF2=y):
+          # these get an extra `make uf2` step + a .uf2 artifact.
+          mapfile -t uf2_boards < <(python3 tools/uf2_updater.py list)
+          uf2=$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "${uf2_boards[@]}")
+          echo "uf2=$uf2" >> "$GITHUB_OUTPUT"
 
   build:
     name: ${{ matrix.board }}
@@ -86,6 +97,10 @@ jobs:
       - name: Build updater
         run: make updater BOARD=${{ matrix.board }}
 
+      - name: Build UF2 updater
+        if: contains(fromJSON(needs.boards.outputs.uf2), matrix.board)
+        run: make uf2 BOARD=${{ matrix.board }}
+
       - name: Upload bootloader
         uses: actions/upload-artifact@v7
         with:
@@ -98,4 +113,12 @@ jobs:
         with:
           name: updater-${{ matrix.board }}
           path: build-${{ matrix.board }}-updater/zephyr/zephyr.signed.bin
+          if-no-files-found: error
+
+      - name: Upload UF2 updater
+        if: contains(fromJSON(needs.boards.outputs.uf2), matrix.board)
+        uses: actions/upload-artifact@v7
+        with:
+          name: uf2-${{ matrix.board }}
+          path: build-${{ matrix.board }}-updater/mcuboot-updater.uf2
           if-no-files-found: error
