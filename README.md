@@ -20,6 +20,22 @@ boards:
 * Prebuilt updater binaries
 * Shared LED status
 
+## Building the bootloader standalone
+
+You can build just the bootloader from this repo, with one command, using the
+[Adafruit fork of Zephyr](https://github.com/adafruit/zephyr) (the same Zephyr
+CircuitPython's `zephyr-cp` port uses) -- no west manifest of your own required:
+
+```
+make workspace                     # one-time: fetches Adafruit Zephyr + HALs into deps/
+make list                          # boards this fork can build
+make build BOARD=nrf54l15dk        # build the bootloader for one board
+make all                           # build every board
+```
+
+See [docs/standalone-build.md](docs/standalone-build.md) for details, modes,
+signature defaults, and the other targets.
+
 ## [MCUboot](http://mcuboot.com/)
 
 [![Package on PyPI](https://img.shields.io/pypi/v/imgtool.svg)][pypi]
