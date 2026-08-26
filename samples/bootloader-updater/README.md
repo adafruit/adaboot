@@ -47,7 +47,18 @@ builds the updater. Output:
 build-nrf54l15dk-updater/zephyr/zephyr.signed.bin
 ```
 
-Flash that to slot0. For a manual build (without the Makefile):
+Flash that to slot0. For a UF2-capable bootloader (`conf/<key>.conf` with
+`CONFIG_MCUBOOT_UF2=y`), `make uf2 BOARD=<key>` instead produces a
+`.uf2` you can drag onto the bootloader's USB drive:
+
+```
+make uf2 BOARD=nrf54lm20dk
+# -> build-nrf54lm20dk-updater/mcuboot-updater.uf2
+```
+
+See [docs/standalone-build.md](../docs/standalone-build.md) "Updater UF2 files".
+
+For a manual build (without the Makefile):
 
 ```
 west build -b nrf54l15dk/nrf54l15/cpuapp samples/bootloader-updater -- \

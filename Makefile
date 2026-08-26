@@ -33,6 +33,11 @@ BUILD ?= build-$(BOARD)
 # Per-board build directory for the bootloader-updater application.
 UPDATER ?= $(BUILD)-updater
 
+# Boards whose bootloader is UF2-capable: those whose conf/<key>.conf enables
+# CONFIG_MCUBOOT_UF2=y (sourced from tools/uf2_updater.py). Only these have a
+# USB mass-storage drive to drag a .uf2 onto, so only their updaters get a UF2.
+UF2_BOARDS ?= $(shell python3 $(ADABOOT_DIR)/tools/uf2_updater.py list)
+
 # When BOARD is given on the command line, resolve its Zephyr board id, layout
 # overlay and mode once at parse time. $(shell ...) collapses newlines to spaces,
 # so each field is fetched on its own (see tools/standalone_build.py get).
@@ -54,7 +59,7 @@ ifneq ($(strip $(BOARD_CONF)),)
 BOOT_CONF_FILE := $(BOOT_CONF_FILE);$(BOARD_CONF)
 endif
 
-.PHONY: help list show workspace update build updater all menuconfig flash \
+.PHONY: help list show workspace update build updater uf2 all-uf2 all menuconfig flash \
         clean clean-all clean-workspace
 
 help:
@@ -67,7 +72,9 @@ help:
 	@echo "  make list             list boards this fork can build"
 	@echo "  make build BOARD=<key>   build the bootloader for one board"
 	@echo "  make updater BOARD=<key>  build the bootloader + a slot0 updater that rewrites it"
+	@echo "  make uf2 BOARD=<key>     build the updater and emit a .uf2 (UF2-capable boards only)"
 	@echo "  make all              build every board (override: make all BOARDS='a b')"
+	@echo "  make all-uf2          build a .uf2 updater for every UF2-capable board"
 	@echo "  make menuconfig BOARD=<key>"
 	@echo "  make flash BOARD=<key>"
 	@echo
@@ -77,7 +84,8 @@ help:
 	@echo "  make clean-workspace       remove the west workspace (deps/ + .west)"
 	@echo
 	@echo "Adafruit Zephyr rev: $(ZEPHYR_REV)"
-	@echo "Boards ($(words $(BOARDS)): $(BOARDS)"
+	@echo "Boards ($(words $(BOARDS))): $(BOARDS)"
+	@echo "UF2-capable ($(words $(UF2_BOARDS))): $(UF2_BOARDS)"
 
 list:
 	@python3 $(ADABOOT_DIR)/tools/standalone_build.py list | column
@@ -157,6 +165,33 @@ updater:
 	  -DMCUBOOT_IMAGE_BIN=$(ADABOOT_DIR)/$(BUILD)/mcuboot.bin
 	@echo "==> $(UPDATER)/zephyr/zephyr.signed.bin  (flash to slot0 to self-update the bootloader)"
 
+# Build the updater and convert it to a UF2 file, for one UF2-capable board.
+#
+# Runs `updater` first (so the bootloader + updater builds exist), then turns
+# the updater's signed image into a .uf2 you can drag onto the bootloader's
+# UF2 mass-storage drive. The UF2 base address is slot0's flash offset (fa_off)
+# -- the address the UF2 bootloader writes incoming blocks at -- and the
+# family ID is the bootloader's CONFIG_MCUBOOT_UF2_FAMILY_ID; both are read
+# from the freshly built trees by tools/uf2_updater.py (base from the updater
+# EDT pickle, family from the bootloader .config).
+#
+# The base/family are computed inside the recipe (shell `$$()`, not Make's
+# `$(shell)`) so they read the build dirs *after* `updater` has populated them.
+#
+# Output:
+#   $(UPDATER)/mcuboot-updater.uf2   (drag this onto the UF2 drive)
+uf2:
+	@if [ -z "$(BOARD)" ]; then echo "Set BOARD=<key>; see 'make list'. Run 'make workspace' first."; false; fi
+	@if [ -z "$(WEST_BOARD)" ]; then echo "Unknown board '$(BOARD)'; see 'make list'."; false; fi
+	@$(MAKE) --no-print-directory updater BOARD=$(BOARD)
+	@base=$$(python3 $(ADABOOT_DIR)/tools/uf2_updater.py base $(UPDATER)); \
+	 family=$$(python3 $(ADABOOT_DIR)/tools/uf2_updater.py family $(BUILD)); \
+	 echo "==> Converting $(BOARD) updater to UF2 (base $$base, family $$family)"; \
+	 python3 $(ADABOOT_DIR)/scripts/imgtool.py uf2 --base-addr $$base --family-id $$family \
+	   $(UPDATER)/zephyr/zephyr.signed.bin $(UPDATER)/zephyr.signed.uf2; \
+	 cp $(UPDATER)/zephyr.signed.uf2 $(UPDATER)/mcuboot-updater.uf2; \
+	 echo "==> $(UPDATER)/mcuboot-updater.uf2  (drag onto the UF2 drive to self-update the bootloader)"
+
 menuconfig:
 	@if [ -z "$(BOARD)" ]; then echo "Set BOARD=<key>; see 'make list'."; false; fi
 	@if [ -z "$(WEST_BOARD)" ]; then echo "Unknown board '$(BOARD)'; see 'make list'."; false; fi
@@ -193,3 +228,19 @@ all:
 	  fi; \
 	done; \
 	if [ -n "$$failed" ]; then echo "Failed boards:$$failed" >&2; exit 1; fi
+
+# Build a .uf2 updater for every UF2-capable board (conf/<key>.conf enables
+# CONFIG_MCUBOOT_UF2=y). Continues on error so one failing board does not stop
+# the rest. To stop on first failure, use: make all-uf2 STOP_ON_ERROR=1.
+# Override the set with: make all-uf2 UF2_BOARDS='nrf54lm20dk'
+all-uf2:
+	@set -e; \
+	failed=""; \
+	for b in $(UF2_BOARDS); do \
+	  echo "==> $$b"; \
+	  if $(MAKE) uf2 BOARD=$$b; then :; else \
+	    if [ -n "$(STOP_ON_ERROR)" ]; then echo "!! uf2 failed for $$b" >&2; exit 1; fi; \
+	    echo "!! uf2 failed for $$b (continuing)" >&2; failed="$$failed $$b"; \
+	  fi; \
+	done; \
+	if [ -n "$$failed" ]; then echo "Failed UF2 boards:$$failed" >&2; exit 1; fi
