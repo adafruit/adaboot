@@ -1,0 +1,101 @@
+# Build the Adaboot bootloader and its slot0 bootloader-updater for every
+# board this fork owns a partition layout for (tools/boards.toml).
+#
+# The board matrix is generated from `tools/standalone_build.py list` (the
+# same source the Makefile uses) so the workflow cannot drift from the dts/
+# tree. Each matrix job sets up a west workspace with the Adafruit Zephyr
+# fork via zephyrproject-rtos/action-zephyr-setup (the same action
+# CircuitPython's zephyr-cp port CI uses, against the same zephyr-config
+# manifest) and then runs `make build` / `make updater`.
+#
+# Artifacts per board:
+#   mcuboot-<board>/mcuboot.bin                    - the bootloader
+#   updater-<board>/zephyr.signed.bin              - slot0 image that rewrites
+#                                                    the boot partition
+
+name: Build Adaboot
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only cancel ongoing runs for PRs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  boards:
+    name: List boards
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.boards.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+      - name: Build board matrix
+        id: boards
+        run: |
+          mapfile -t boards < <(python3 tools/standalone_build.py list)
+          if [ "${#boards[@]}" -eq 0 ]; then
+            echo "No boards found" >&2
+            exit 1
+          fi
+          matrix=$(python3 -c 'import json, sys; print(json.dumps({"board": sys.argv[1:]}))' "${boards[@]}")
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.board }}
+    needs: boards
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.boards.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+
+      - name: Generate west manifest
+        run: make zephyr-config/west.yml
+
+      - name: Set up Zephyr
+        uses: zephyrproject-rtos/action-zephyr-setup@v1
+        with:
+          app-path: zephyr-config
+          toolchains: arm-zephyr-eabi
+
+      - name: Build bootloader
+        run: make build BOARD=${{ matrix.board }}
+
+      - name: Build updater
+        run: make updater BOARD=${{ matrix.board }}
+
+      - name: Upload bootloader
+        uses: actions/upload-artifact@v7
+        with:
+          name: mcuboot-${{ matrix.board }}
+          path: build-${{ matrix.board }}/mcuboot.bin
+          if-no-files-found: error
+
+      - name: Upload updater
+        uses: actions/upload-artifact@v7
+        with:
+          name: updater-${{ matrix.board }}
+          path: build-${{ matrix.board }}-updater/zephyr/zephyr.signed.bin
+          if-no-files-found: error
