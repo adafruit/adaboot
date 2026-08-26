@@ -40,6 +40,18 @@ ifdef BOARD
 WEST_BOARD := $(shell python3 $(ADABOOT_DIR)/tools/standalone_build.py get $(BOARD) west_board)
 OVERLAY    := $(shell python3 $(ADABOOT_DIR)/tools/standalone_build.py get $(BOARD) overlay)
 MODE       := $(shell python3 $(ADABOOT_DIR)/tools/standalone_build.py get $(BOARD) mode)
+# Optional board-specific conf fragment (conf/<key>.conf), empty if absent.
+BOARD_CONF := $(shell python3 $(ADABOOT_DIR)/tools/standalone_build.py get $(BOARD) board_conf)
+endif
+
+# EXTRA_CONF_FILE the bootloader build uses: the mode/signature conf fragment,
+# optionally followed by a board-specific fragment (conf/<key>.conf) that can
+# opt a board into UF2 / serial recovery / no-application fallback. Zephyr
+# treats EXTRA_CONF_FILE as a CMake list (semicolon-separated); the value is
+# quoted in the recipes below so the shell does not split on the semicolon.
+BOOT_CONF_FILE := $(CONF_DIR)/mode-$(MODE).conf
+ifneq ($(strip $(BOARD_CONF)),)
+BOOT_CONF_FILE := $(BOOT_CONF_FILE);$(BOARD_CONF)
 endif
 
 .PHONY: help list show workspace update build updater all menuconfig flash \
@@ -76,6 +88,8 @@ show:
 	@echo "WEST_BOARD=$(WEST_BOARD)"
 	@echo "MODE=$(MODE)"
 	@echo "OVERLAY=$(OVERLAY)"
+	@echo "BOARD_CONF=$(BOARD_CONF)"
+	@echo "BOOT_CONF_FILE=$(BOOT_CONF_FILE)"
 	@echo "BUILD=$(BUILD)"
 	@echo "UPDATER=$(UPDATER)"
 
@@ -111,7 +125,7 @@ build:
 	$(WEST) build -b $(WEST_BOARD) -d $(BUILD) $(ADABOOT_DIR)/boot/zephyr -- \
 	  -DEXTRA_ZEPHYR_MODULES=$(ADABOOT_DIR) \
 	  -DEXTRA_DTC_OVERLAY_FILE=$(OVERLAY) \
-	  -DEXTRA_CONF_FILE=$(CONF_DIR)/mode-$(MODE).conf
+	  -DEXTRA_CONF_FILE="$(BOOT_CONF_FILE)"
 	@cp $(BUILD)/zephyr/zephyr.bin $(BUILD)/mcuboot.bin
 	@-cp $(BUILD)/zephyr/zephyr.hex $(BUILD)/mcuboot.hex 2>/dev/null || true
 	@echo "==> $(BUILD)/mcuboot.bin  (elf/hex in $(BUILD)/zephyr/)"
@@ -149,7 +163,7 @@ menuconfig:
 	$(WEST) build -b $(WEST_BOARD) -d $(BUILD) $(ADABOOT_DIR)/boot/zephyr --target menuconfig -- \
 	  -DEXTRA_ZEPHYR_MODULES=$(ADABOOT_DIR) \
 	  -DEXTRA_DTC_OVERLAY_FILE=$(OVERLAY) \
-	  -DEXTRA_CONF_FILE=$(CONF_DIR)/mode-$(MODE).conf
+	  -DEXTRA_CONF_FILE="$(BOOT_CONF_FILE)"
 
 flash:
 	@if [ -z "$(BOARD)" ]; then echo "Set BOARD=<key>; see 'make list'."; false; fi

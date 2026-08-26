@@ -18,6 +18,8 @@ get <key> <field>
         west_board   canonical Zephyr board id, e.g. nrf54l15dk/nrf54l15/cpuapp
         overlay      absolute path to dts/<vendor>/<key>.dtsi
         mode         single_app | ram_load
+        board_conf   absolute path to conf/<key>.conf, or an empty line if the
+                     board has no board-specific conf fragment
 
     The Makefile calls this once per field (``$(shell ...)`` collapses newlines
     to spaces, so a multi-assignment blob would be parsed as a single value;
@@ -31,6 +33,7 @@ import tomllib
 MODULE_DIR = pathlib.Path(__file__).resolve().parent.parent
 BOARDS_TOML = MODULE_DIR / "tools" / "boards.toml"
 DTS_DIR = MODULE_DIR / "dts"
+CONF_DIR = MODULE_DIR / "conf"
 
 # boards.toml mcuboot_mode value -> the Zephyr Kconfig the standalone build sets.
 # Mirrors Zephyr's sysbuild image_configurations/BOOTLOADER_image_default.cmake
@@ -65,14 +68,20 @@ def cmd_list_all():
     return 0
 
 
-FIELDS = {"west_board", "overlay", "mode"}
+FIELDS = {"west_board", "overlay", "mode", "board_conf"}
 
 
 def resolve(key):
-    """Return (west_board, overlay, mode) for a partition key, or raise.
+    """Return (west_board, overlay, mode, board_conf) for a partition key.
 
     Only mcuboot-booting boards are resolvable: standalone (mcuboot = false)
     boards have a hand-maintained layout but no mcuboot bootloader to build.
+
+    ``board_conf`` is the absolute path to ``conf/<key>.conf`` if such a
+    board-specific conf fragment exists, else an empty string. The standalone
+    Makefile appends it (after the mode conf) to EXTRA_CONF_FILE so a board can
+    opt into UF2 / serial recovery / no-application fallback without forcing
+    those (USB/UART-dependent) features on every board.
     """
     boards = load_boards()
     if key not in boards:
@@ -95,7 +104,9 @@ def resolve(key):
         raise ValueError(f"layout overlay not found: {overlay}")
     if mode not in MODE_CONFIG:
         raise ValueError(f"unknown mcuboot_mode '{mode}' for {key}")
-    return west_board, str(overlay), mode
+    board_conf = CONF_DIR / f"{key}.conf"
+    board_conf = str(board_conf.resolve()) if board_conf.exists() else ""
+    return west_board, str(overlay), mode, board_conf
 
 
 def cmd_get(key, field):
@@ -103,11 +114,12 @@ def cmd_get(key, field):
         sys.stderr.write(f"error: unknown field '{field}'; one of {' '.join(sorted(FIELDS))}\n")
         return 2
     try:
-        west_board, overlay, mode = resolve(key)
+        west_board, overlay, mode, board_conf = resolve(key)
     except ValueError as e:
         sys.stderr.write(f"error: {e}\n")
         return 2
-    print({"west_board": west_board, "overlay": overlay, "mode": mode}[field])
+    print({"west_board": west_board, "overlay": overlay, "mode": mode,
+           "board_conf": board_conf}[field])
     return 0
 
 

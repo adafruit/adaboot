@@ -111,6 +111,34 @@ serial-recovery bootloader, not a secure boot chain, so the bootloader image is
 built hash-only. To add image verification, set a signature type and key in a
 board-specific conf fragment instead.
 
+### Board-specific conf fragments
+
+A board can opt into USB/UART-dependent recovery features (UF2, serial
+recovery, the no-application fallback) by adding `conf/<key>.conf` (where
+`<key>` is the partition key, e.g. `nrf54lm20dk`). When present, `make build`
+and `make updater` append it -- after the mode conf -- to `EXTRA_CONF_FILE`, so
+its settings layer on top of the mode/signature defaults. Boards without a
+`conf/<key>.conf` build the minimal bootloader as before.
+
+For example, `conf/nrf54lm20dk.conf` enables UF2 drag-and-drop plus the
+`MCUBOOT_UF2_NO_APPLICATION` fallback, so the bootloader enters UF2 mode
+(presents a USB mass-storage drive) when no bootable application is found
+instead of halting. It also enables double-tap reset entrance and the
+multithreading / retention pieces the USB and double-tap stacks need on Nordic.
+
+```
+CONFIG_MULTITHREADING=y
+CONFIG_MCUBOOT_UF2=y
+CONFIG_MCUBOOT_UF2_NO_APPLICATION=y
+CONFIG_RETAINED_MEM=y
+CONFIG_RETENTION=y
+CONFIG_RETENTION_BOOT_MODE=y
+CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP=y
+```
+
+Only add a board conf fragment for boards that actually have the hardware
+(native USB for UF2, a UART for serial recovery).
+
 These are the same defaults the fork's `dts/Kconfig.sysbuild` applies under
 sysbuild (`SB_CONFIG_MCUBOOT_MODE_*` -> `CONFIG_*`), translated for a direct
 `boot/zephyr` build. See `tools/standalone_build.py` for the mapping.
@@ -138,9 +166,9 @@ make update                      # re-run west update (e.g. after bumping ZEPHYR
 
 - `make build` builds a **minimal** bootloader (boot slot0, swap/ram-load per
   mode, hash-only). UF2 and serial recovery are board-specific (they need a USB
-  or UART backend) and are not enabled by the standalone conf fragments; enable
-  `CONFIG_MCUBOOT_SERIAL` / `CONFIG_MCUBOOT_UF2` in a board conf fragment when
-  the board has the hardware.
+  or UART backend): add a `conf/<key>.conf` board fragment to opt a board in
+  (see "Board-specific conf fragments" above). The mode conf fragments
+  themselves stay hardware-agnostic.
 - The partition layout comes from this fork's `dts/`; if you edit a dtsi you see
   the change immediately (the overlay is read from this tree, not from `deps/`).
 - Everything under `deps/`, `.west/`, `build-*/`, and the generated
