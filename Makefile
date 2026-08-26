@@ -30,6 +30,8 @@ BOARDS ?= $(shell python3 $(ADABOOT_DIR)/tools/standalone_build.py list)
 
 # Per-board build directory.
 BUILD ?= build-$(BOARD)
+# Per-board build directory for the bootloader-updater application.
+UPDATER ?= $(BUILD)-updater
 
 # When BOARD is given on the command line, resolve its Zephyr board id, layout
 # overlay and mode once at parse time. $(shell ...) collapses newlines to spaces,
@@ -40,7 +42,7 @@ OVERLAY    := $(shell python3 $(ADABOOT_DIR)/tools/standalone_build.py get $(BOA
 MODE       := $(shell python3 $(ADABOOT_DIR)/tools/standalone_build.py get $(BOARD) mode)
 endif
 
-.PHONY: help list show workspace update build all menuconfig flash \
+.PHONY: help list show workspace update build updater all menuconfig flash \
         clean clean-all clean-workspace
 
 help:
@@ -52,6 +54,7 @@ help:
 	@echo "Build:"
 	@echo "  make list             list boards this fork can build"
 	@echo "  make build BOARD=<key>   build the bootloader for one board"
+	@echo "  make updater BOARD=<key>  build the bootloader + a slot0 updater that rewrites it"
 	@echo "  make all              build every board (override: make all BOARDS='a b')"
 	@echo "  make menuconfig BOARD=<key>"
 	@echo "  make flash BOARD=<key>"
@@ -74,6 +77,7 @@ show:
 	@echo "MODE=$(MODE)"
 	@echo "OVERLAY=$(OVERLAY)"
 	@echo "BUILD=$(BUILD)"
+	@echo "UPDATER=$(UPDATER)"
 
 # Generate the workspace manifest from the template (pins the Zephyr revision).
 $(WORKSPACE_MANIFEST): $(WORKSPACE_MANIFEST_IN)
@@ -112,6 +116,33 @@ build:
 	@-cp $(BUILD)/zephyr/zephyr.hex $(BUILD)/mcuboot.hex 2>/dev/null || true
 	@echo "==> $(BUILD)/mcuboot.bin  (elf/hex in $(BUILD)/zephyr/)"
 
+# Build the bootloader-updater application for one board.
+#
+# Builds the bootloader first (target `build`), then builds
+# samples/bootloader-updater -- an ordinary slot0 application that embeds that
+# mcuboot.bin as a payload. When the bootloader writes the updater into slot0
+# and boots it, the updater overwrites the boot ("mcuboot") partition with the
+# embedded image, i.e. it self-updates the bootloader. The output is a
+# hash-only mcuboot image ready to flash to slot0 (UF2 / serial recovery /
+# debugger):
+#
+#   $(UPDATER)/zephyr/zephyr.signed.bin
+#
+# The app-side mode conf (conf/app-mode-<mode>.conf) mirrors conf/mode-<mode>.conf
+# so imgtool sizes/aligns the image the same way the bootloader expects.
+updater:
+	@if [ -z "$(BOARD)" ]; then echo "Set BOARD=<key>; see 'make list'. Run 'make workspace' first."; false; fi
+	@if [ -z "$(WEST_BOARD)" ]; then echo "Unknown board '$(BOARD)'; see 'make list'."; false; fi
+	@echo "==> Building bootloader payload for $(BOARD)"
+	@$(MAKE) --no-print-directory build BOARD=$(BOARD)
+	@echo "==> Building updater for $(BOARD) (Zephyr board $(WEST_BOARD), mode $(MODE))"
+	$(WEST) build -b $(WEST_BOARD) -d $(UPDATER) $(ADABOOT_DIR)/samples/bootloader-updater -- \
+	  -DEXTRA_ZEPHYR_MODULES=$(ADABOOT_DIR) \
+	  -DEXTRA_DTC_OVERLAY_FILE=$(OVERLAY) \
+	  -DEXTRA_CONF_FILE=$(CONF_DIR)/app-mode-$(MODE).conf \
+	  -DMCUBOOT_IMAGE_BIN=$(ADABOOT_DIR)/$(BUILD)/mcuboot.bin
+	@echo "==> $(UPDATER)/zephyr/zephyr.signed.bin  (flash to slot0 to self-update the bootloader)"
+
 menuconfig:
 	@if [ -z "$(BOARD)" ]; then echo "Set BOARD=<key>; see 'make list'."; false; fi
 	@if [ -z "$(WEST_BOARD)" ]; then echo "Unknown board '$(BOARD)'; see 'make list'."; false; fi
@@ -125,7 +156,7 @@ flash:
 	$(WEST) flash -d $(BUILD)
 
 clean:
-	@rm -rf $(BUILD)
+	@rm -rf $(BUILD) $(UPDATER)
 
 clean-all:
 	@rm -rf $(wildcard build-*)
