@@ -1,13 +1,30 @@
 # Board registry for the partition layout tool.
 #
-# Each key is the partition key (the Zephyr board name, e.g. "nrf54l15dk") and
-# maps to the canonical Zephyr board id used to run `west build --cmake-only`, plus
-# the vendor so the generated dtsi is written to
-# dts/<vendor>/<board>.dtsi (mirroring the board folder
-# layout). An optional [external_flash] table supplies the erase-block-size for
-# SPI NOR devices that don't expose it in their DTS binding. An optional
-# mcuboot_mode picks the SB_CONFIG_MCUBOOT_MODE_<mode> the layout was planned
-# for (default "single_app").
+# Every dts/<vendor>/<board>.dtsi in this fork has an entry here (run
+# `python3 tools/partition_layout.py --list` and it matches the dts/ tree 1:1).
+# Each key is the partition key (the dtsi filename stem, e.g. "nrf54l15dk") and
+# maps to the canonical Zephyr board id used to run `west build --cmake-only`,
+# plus the vendor so the generated dtsi is written to dts/<vendor>/<board>.dtsi
+# (mirroring the board folder layout). An optional [external_flash] table supplies
+# the erase-block-size for SPI NOR devices that don't expose it in their DTS
+# binding. An optional mcuboot_mode picks the SB_CONFIG_MCUBOOT_MODE_<mode> the
+# layout was planned for (default "single_app").
+#
+# mcuboot = true (the default): the board boots via mcuboot (Adaboot). The
+# partition_layout.py planner generates its dtsi (`--fix`) and --gen-list puts
+# it in MCUBOOT_BOARDS / dts/Kconfig.sysbuild, and `make all` builds a mcuboot
+# bootloader for it. For boards that share a flash with a ROM loader / network
+# processor (e.g. SiWx917, where the M4 only owns a code_partition sub-region),
+# the planner splits that region into boot+slot0 and emits a
+# zephyr,mapped-partition overlay that keeps the loader-owned partitions.
+#
+# mcuboot = false: the board is standalone -- it has no mcuboot domain (RP2040 /
+# RP2350 boot from their own UF2 second-stage loader, STM32H750B-DK executes in
+# place). Its dtsi is hand-maintained (a zephyr,mapped-partition layout the
+# planner cannot emit), so --fix refuses to touch it and --gen-list leaves it
+# out of MCUBOOT_BOARDS / Kconfig.sysbuild. It is still registered here so the
+# dts/ tree and this file cannot drift, and so `--list` is the complete index
+# of layouts.
 #
 # This is the single list of boards this bootloader fork owns the memory map
 # for. Applications (CircuitPython, Arduino, Wippersnapper) consume the
@@ -58,6 +75,14 @@ vendor = "nordic"
 label = "mx25r64"
 erase_block_size = 4096
 
+[boards.nrf54lm20dk]
+board = "nrf54lm20dk/nrf54lm20a/cpuapp"
+vendor = "nordic"
+
+[boards.nrf54lm20dk.external_flash]
+label = "mx25r64"
+erase_block_size = 4096
+
 [boards.nrf7002dk]
 board = "nrf7002dk/nrf5340/cpuapp"
 vendor = "nordic"
@@ -91,3 +116,36 @@ erase_block_size = 4096
 [boards.stm32wba65i_dk1]
 board = "stm32wba65i_dk1"
 vendor = "st"
+
+[boards.siwx917_dk2605a]
+board = "siwx917_dk2605a"
+vendor = "silabs"
+
+# ── Standalone boards (mcuboot = false) ─────────────────────────────────────
+# These boot without a mcuboot domain (UF2-native or XIP). Their dtsi files are
+# hand-maintained zephyr,mapped-partition layouts; the planner's --fix refuses to
+# overwrite them and --gen-list keeps them out of MCUBOOT_BOARDS /
+# Kconfig.sysbuild. They are here only so the dts/ tree and this registry stay
+# in 1:1 sync. To move one onto mcuboot, set `mcuboot = true` (or delete the
+# line), regenerate dts/mcuboot_boards.cmake (--gen-list), and replace its dtsi
+# with a mcuboot layout.
+
+[boards.adafruit_feather_rp2040]
+board = "adafruit_feather_rp2040"
+vendor = "adafruit"
+mcuboot = false
+
+[boards.rpi_pico]
+board = "rpi_pico"
+vendor = "raspberrypi"
+mcuboot = false
+
+[boards.rpi_pico2]
+board = "rpi_pico2"
+vendor = "raspberrypi"
+mcuboot = false
+
+[boards.stm32h750b_dk]
+board = "stm32h750b_dk"
+vendor = "st"
+mcuboot = false

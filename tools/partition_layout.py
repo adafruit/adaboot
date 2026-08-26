@@ -118,6 +118,11 @@ def load_boards_manifest():
             "vendor": entry.get("vendor"),
             "external_flash": entry.get("external_flash"),
             "mcuboot_mode": entry.get("mcuboot_mode", DEFAULT_MCUBOOT_MODE),
+            # Standalone (UF2-native / XIP / not-yet-on-mcuboot) boards are
+            # registered in boards.toml with mcuboot = false so the dts/ tree and
+            # this registry stay in sync, but the planner does not own their
+            # (hand-maintained, mapped-partition) layout.
+            "mcuboot": entry.get("mcuboot", True),
         }
     return boards
 
@@ -131,8 +136,24 @@ def discover_boards():
 
 
 def cmake_only_build(board_id, build_dir):
-    """Run west build --cmake-only to generate the resolved devicetree."""
+    """Run west build --cmake-only to generate the resolved devicetree.
+
+    The build only needs the resolved devicetree (``edt.pickle``), so it is run
+    against Zephyr's ``hello_world`` sample as a throwaway application -- this
+    repo's bootloader app (``boot/zephyr``) is not used because pulling it in
+    would require this module to be wired up as a west module and would couple
+    layout planning to the bootloader build. The board's own DTS (which is
+    where the flash geometry lives) is what produces the edt, not the app.
+    """
     build_dir.mkdir(parents=True, exist_ok=True)
+    sample_dir = ZEPHYR_BASE / "samples" / "hello_world"
+    if not sample_dir.is_dir():
+        print(
+            f"Zephyr sample not found at {sample_dir}; is ZEPHYR_BASE set / "
+            f"is the workspace fetched (make workspace)?",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     cmd = [
         "west",
         "build",
@@ -141,6 +162,7 @@ def cmake_only_build(board_id, build_dir):
         "-d",
         str(build_dir),
         "--cmake-only",
+        str(sample_dir),
     ]
     result = subprocess.run(cmd, cwd=MODULE_DIR, capture_output=True, text=True)
     if result.returncode != 0:
@@ -518,6 +540,122 @@ def plan_partitions_predefined(edt, flash_overrides=None):
     return result
 
 
+# ── Mapped-partition split (shared-flash boards) ───────────────────────────
+
+
+def _partition_device(part_node):
+    """Walk up from a partition node to the NVM memory node that owns it.
+
+    The memory node is the first ancestor with a ``reg`` property (the
+    partition's own ``reg`` is an offset+size within it; the ``partitions``
+    grouping node has none).
+    """
+    p = part_node.parent
+    while p is not None:
+        if p.props.get("reg") is not None:
+            return p
+        p = p.parent
+    return None
+
+
+def _find_code_partition_region(edt):
+    """Find the upstream app code partition mcuboot should split.
+
+    Some boards boot via mcuboot but share their single flash with a ROM loader
+    / network processor that owns most of it (e.g. SiWx917: the M4 only owns a
+    ``code_partition`` sub-region the ROM loader jumps to). The board's upstream
+    DTS labels that region ``code_partition`` as a ``zephyr,mapped-partition``.
+    This returns ``(dev_label, offset, size, node_labels, erase_size)`` for that
+    partition, or ``None`` when there is no such partition (so this planning path
+    is skipped for boards that own a whole device or already have a mcuboot
+    layout upstream).
+    """
+    for node in edt.nodes:
+        if "zephyr,mapped-partition" not in getattr(node, "compats", []):
+            continue
+        if "code_partition" not in getattr(node, "labels", []):
+            continue
+        reg = node.props.get("reg")
+        if not reg or len(reg.val) < 2:
+            continue
+        dev = _partition_device(node)
+        if dev is None:
+            continue
+        dev_label = dev.labels[0] if dev.labels else dev.name
+        return (dev_label, reg.val[0], reg.val[1], list(node.labels), get_erase_size(dev))
+    return None
+
+
+def plan_code_partition_split(edt, flash_overrides=None):
+    """Plan a single-app mcuboot layout within the board's upstream code region.
+
+    For boards that share a flash with a ROM loader / network processor, the
+    planner cannot plan the whole device (it would collide with the regions the
+    loader owns). Instead it splits the board's existing ``code_partition``
+    (a ``zephyr,mapped-partition``) into ``boot_partition`` + ``slot0_partition``
+    and emits a mapped-partition overlay that deletes the upstream
+    ``code_partition`` and replaces it. ``slot0_partition`` also carries the
+    upstream ``code_partition`` label so the board's ``zephyr,code-partition =
+    &code_partition`` chosen still resolves to it. All other upstream partitions
+    are left untouched.
+
+    Returns a dict describing the split, or ``None`` if this board does not use
+    this pattern (a predefined mcuboot layout exists upstream, or there is no
+    ``code_partition`` region to split).
+    """
+    if _has_predefined_mcuboot(edt, flash_overrides):
+        return None
+    region = _find_code_partition_region(edt)
+    if region is None:
+        return None
+    dev_label, base, total, upstream_labels, erase = region
+    boot_size = align_up(128 * KB, erase)
+    slot0_offset = base + boot_size
+    slot0_size = align_down(total - boot_size, erase)
+    slot0_labels = ["slot0_partition"] + [
+        l for l in upstream_labels if l != "slot0_partition"
+    ]
+    return {
+        "dev_label": dev_label,
+        "erase": erase,
+        "region_size": total,
+        "delete_labels": upstream_labels,
+        "boot": ("mcuboot", "boot_partition", base, boot_size),
+        "slot0": ("image-0", slot0_labels, slot0_offset, slot0_size),
+    }
+
+
+def generate_mapped_split_dtsi(plan):
+    """Emit the mapped-partition overlay for a code_partition split."""
+    dev = plan["dev_label"]
+    boot_label, _boot_node, boot_off, boot_size = plan["boot"]
+    slot0_label, slot0_labels, slot0_off, slot0_size = plan["slot0"]
+    lines = []
+    # Delete the upstream app code partition(s) before re-adding so the new
+    # boot/slot0 nodes don't overlap the original region.
+    for lbl in plan["delete_labels"]:
+        lines.append(f"/delete-node/ &{lbl};")
+    lines.append("")
+    lines.append(f"&{dev} {{")
+    lines.append("\tpartitions {")
+    lines.append(f"\t\tboot_partition: partition@{boot_off:x} {{")
+    lines.append('\t\t\tcompatible = "zephyr,mapped-partition";')
+    lines.append(f'\t\t\tlabel = "{boot_label}";')
+    lines.append(f"\t\t\treg = <0x{boot_off:x} {format_dt_size(boot_size)}>;")
+    lines.append("\t\t};")
+    lines.append("")
+    label_decls = " ".join(f"{l}:" for l in slot0_labels)
+    lines.append(f"\t\t{label_decls} partition@{slot0_off:x} {{")
+    lines.append('\t\t\tcompatible = "zephyr,mapped-partition";')
+    lines.append(f'\t\t\tlabel = "{slot0_label}";')
+    lines.append(f"\t\t\treg = <0x{slot0_off:x} {format_dt_size(slot0_size)}>;")
+    lines.append("\t\t};")
+    lines.append("\t};")
+    lines.append("};")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def plan_partitions(edt, flash_overrides=None):
     """Determine the partition layout based on available flash devices.
 
@@ -755,13 +893,15 @@ def gen_mcuboot_boards_cmake():
     The generated file is the fork's machine-readable answer to the two
     questions an application's sysbuild has: "where is this board's layout?"
     (MCUBOOT_LAYOUT_<board>, discovered from the dts/ tree) and "does it boot
-    via mcuboot?" (MCUBOOT_BOARDS, from boards.toml, which lists exactly the
-    boards the planner produces fixed-partitions mcuboot layouts for).
-    Standalone boards are hand-maintained and not in boards.toml, but they do
-    get a MCUBOOT_LAYOUT_<board> entry so applications never have to guess a
-    path or glob the vendor directory.
+    via mcuboot?" (MCUBOOT_BOARDS, the boards.toml entries with mcuboot = true,
+    which lists exactly the boards the planner produces fixed-partitions mcuboot
+    layouts for). Standalone boards are registered in boards.toml with
+    mcuboot = false; they get a MCUBOOT_LAYOUT_<board> entry (so applications
+    never have to guess a path or glob the vendor directory) but are kept out of
+    MCUBOOT_BOARDS, since their layout is hand-maintained and they do not boot
+    via mcuboot.
     """
-    mcuboot_keys = sorted(load_boards_manifest().keys())
+    mcuboot_keys = sorted(k for k, v in load_boards_manifest().items() if v["mcuboot"])
     layouts = discover_layouts()
 
     missing = [k for k in mcuboot_keys if k not in layouts]
@@ -774,16 +914,18 @@ def gen_mcuboot_boards_cmake():
 
     lines = [
         "# Auto-generated by tools/partition_layout.py --gen-list.",
-        "# Do not edit by hand; add/remove mcuboot boards in tools/boards.toml or",
+        "# Do not edit by hand; add/remove boards in tools/boards.toml or",
         "# add/remove a dts/<vendor>/<board>.dtsi, then re-run",
         "# `python3 tools/partition_layout.py --gen-list`.",
         "#",
         "# MCUBOOT_LAYOUT_<board>  path to that board's self-contained layout overlay.",
-        "# MCUBOOT_LAYOUT_BOARDS   every board with a layout here.",
-        "# MCUBOOT_BOARDS          the subset that boots via mcuboot (Adaboot); sysbuild",
-        "#                         builds a mcuboot image for these and applies the",
-        "#                         layout to both images. Boards not in this list run",
-        "#                         standalone -- layout goes to the application only.",
+        "# MCUBOOT_LAYOUT_BOARDS   every board with a layout here (every dtsi in dts/).",
+        "# MCUBOOT_BOARDS          the subset that boots via mcuboot (Adaboot): the",
+        "#                         boards.toml entries with mcuboot = true (default).",
+        "#                         sysbuild builds a mcuboot image for these and",
+        "#                         applies the layout to both images. Boards with a",
+        "#                         layout here but not in this list (mcuboot = false)",
+        "#                         run standalone -- the layout goes to the app only.",
         "",
     ]
     for key, rel in layouts.items():
@@ -799,7 +941,7 @@ def gen_mcuboot_boards_cmake():
     lines.append("")
     lines.append("set(MCUBOOT_BOARDS")
     lines.extend(f"    {k}" for k in mcuboot_keys)
-    lines.append('    CACHE INTERNAL "Boards that boot via mcuboot (per this fork\'s boards.toml)"')
+    lines.append('    CACHE INTERNAL "Boards that boot via mcuboot (per this fork\'s boards.toml; mcuboot = true)"')
     lines.append(")")
 
     MCUBOOT_BOARDS_CMAKE.parent.mkdir(parents=True, exist_ok=True)
@@ -824,7 +966,7 @@ def gen_kconfig_sysbuild():
     an SB_CONFIG_ assignment in a sysbuild conf fragment.
     """
     boards = load_boards_manifest()
-    keys = sorted(boards.keys())
+    keys = sorted(k for k, v in boards.items() if v["mcuboot"])
 
     modes = {}
     for key in keys:
@@ -836,8 +978,9 @@ def gen_kconfig_sysbuild():
         "# `python3 tools/partition_layout.py --gen-list`.",
         "#",
         "# Bootloader policy for the boards whose partition layout this fork owns.",
-        "# A board is in boards.toml exactly when its layout boots via mcuboot, so the",
-        "# layout and the SB_CONFIG_BOOTLOADER_* settings can never drift apart.",
+        "# A board appears here exactly when its boards.toml entry has mcuboot = true",
+        "# (the default), so the layout and the SB_CONFIG_BOOTLOADER_* settings can",
+        "# never drift apart.",
         "#",
         "# These are defaults: a board's own Kconfig.sysbuild in the Zephyr tree is",
         "# parsed first and wins, and an application can override any of it with an",
@@ -905,6 +1048,28 @@ def fix_alignment(board_key, vendor, edt, flash_overrides=None):
     dtsi_dir = DTS_OUT_DIR / vendor
     dtsi_path = dtsi_dir / f"{board_key}.dtsi"
 
+    split = plan_code_partition_split(edt, flash_overrides)
+    if split is not None:
+        dev_label = split["dev_label"]
+        erase = split["erase"]
+        boot_label, _, boot_off, boot_size = split["boot"]
+        slot0_label, _, slot0_off, slot0_size = split["slot0"]
+        print(f"  {dev_label}  erase page: {format_size(erase)} (shared-flash split)")
+        print(
+            f"    {boot_label}: 0x{boot_off:x} + {format_dt_size(boot_size)}"
+            f" ({format_size(boot_size)})"
+        )
+        print(
+            f"    {slot0_label}: 0x{slot0_off:x} + {format_dt_size(slot0_size)}"
+            f" ({format_size(slot0_size)}) [also: {', '.join(split['slot0'][1])}]"
+        )
+        print()
+        content = generate_mapped_split_dtsi(split)
+        dtsi_dir.mkdir(parents=True, exist_ok=True)
+        dtsi_path.write_text(content)
+        print(f"  Wrote {dtsi_path.relative_to(MODULE_DIR.parent)}")
+        return
+
     planned = plan_partitions(edt, flash_overrides)
     if not planned:
         print("  No flash devices found to plan partitions for.")
@@ -966,9 +1131,10 @@ def main():
         sys.exit(0)
 
     if args.list or not args.board:
-        print("Declared boards:")
+        print("Declared boards (* = standalone, no mcuboot):")
         for key, entry in sorted(boards.items()):
-            print(f"  {key:24s} -> {entry['board']}")
+            marker = "" if entry["mcuboot"] else " *"
+            print(f"  {key:24s} -> {entry['board']}{marker}")
         sys.exit(0 if args.list else 1)
 
     if args.board not in boards:
@@ -979,6 +1145,15 @@ def main():
         sys.exit(1)
 
     entry = boards[args.board]
+    if not entry["mcuboot"]:
+        print(
+            f"{args.board} is a standalone board (mcuboot = false in boards.toml): "
+            "its layout is a hand-maintained zephyr,mapped-partition overlay, not "
+            f"something this planner emits. Edit dts/<vendor>/{args.board}.dtsi by hand.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     board_id = entry["board"]
     vendor = entry.get("vendor")
 
@@ -1000,6 +1175,19 @@ def main():
     if args.fix:
         fix_alignment(args.board, vendor, edt, flash_overrides)
     else:
+        split = plan_code_partition_split(edt, flash_overrides)
+        if split is not None:
+            dev_label = split["dev_label"]
+            erase = split["erase"]
+            region_size = split["region_size"]
+            boot_label, _, boot_off, boot_size = split["boot"]
+            slot0_label, _, slot0_off, slot0_size = split["slot0"]
+            print(f"  {dev_label} ({format_size(region_size)} code region, shared-flash split)  erase page: {format_size(erase)}")
+            print(f"    {boot_label}: 0x{boot_off:x} + {format_size(boot_size)}")
+            print(f"    {slot0_label}: 0x{slot0_off:x} + {format_size(slot0_size)}")
+            print()
+            print("  (upstream mapped-partitions kept; run --fix to write the overlay)")
+            sys.exit(0)
         devices = extract_flash_devices(edt, flash_overrides)
         if not devices:
             print(f"No flash devices with partitions found for {args.board}")

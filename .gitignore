@@ -34,3 +34,11 @@ compile_commands.json
 
 # The target directory from Rust development
 /target/
+
+# Standalone Zephyr build workspace (see Makefile / zephyr-config/west.yml.in).
+# `make workspace` fetches Adafruit Zephyr + HALs here; this repo itself is the
+# mcuboot module, so none of these are committed.
+.west/
+deps/
+build-*/
+zephyr-config/west.yml

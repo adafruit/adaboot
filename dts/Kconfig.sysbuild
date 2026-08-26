@@ -3,8 +3,9 @@
 # `python3 tools/partition_layout.py --gen-list`.
 #
 # Bootloader policy for the boards whose partition layout this fork owns.
-# A board is in boards.toml exactly when its layout boots via mcuboot, so the
-# layout and the SB_CONFIG_BOOTLOADER_* settings can never drift apart.
+# A board appears here exactly when its boards.toml entry has mcuboot = true
+# (the default), so the layout and the SB_CONFIG_BOOTLOADER_* settings can
+# never drift apart.
 #
 # These are defaults: a board's own Kconfig.sysbuild in the Zephyr tree is
 # parsed first and wins, and an application can override any of it with an
@@ -21,9 +22,11 @@ config ADABOOT_BOARD
 	default y if $(BOARD) = "nrf5340dk"
 	default y if $(BOARD) = "nrf54h20dk"
 	default y if $(BOARD) = "nrf54l15dk"
+	default y if $(BOARD) = "nrf54lm20dk"
 	default y if $(BOARD) = "nrf7002dk"
 	default y if $(BOARD) = "nucleo_n657x0_q"
 	default y if $(BOARD) = "nucleo_u575zi_q"
+	default y if $(BOARD) = "siwx917_dk2605a"
 	default y if $(BOARD) = "stm32h7b3i_dk"
 	default y if $(BOARD) = "stm32wba65i_dk1"
 	help
