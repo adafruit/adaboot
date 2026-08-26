@@ -1,0 +1,22 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Bootloader updater application overlay.
+ *
+ * The board's partition layout (applied via -DEXTRA_DTC_OVERLAY_FILE by the
+ * Makefile, the same dtsi the bootloader uses) defines boot_partition and
+ * slot0_partition. This image is a normal application, so it links into the
+ * primary application slot (slot0) -- the bootloader's own app.overlay instead
+ * points zephyr,code-partition at boot_partition.
+ *
+ * With CONFIG_BOOTLOADER_MCUBOOT=y Zephyr selects USE_DT_CODE_PARTITION (except
+ * in ram_load mode), which makes the image link against zephyr,code-partition;
+ * for ram_load boards USE_DT_CODE_PARTITION is not selected and this chosen
+ * node is simply ignored, so the same overlay works for both modes.
+ */
+
+/ {
+	chosen {
+		zephyr,code-partition = &slot0_partition;
+	};
+};

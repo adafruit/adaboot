@@ -66,7 +66,15 @@ filename stem), which are the same keys in `tools/boards.toml` and
 ```
 make list
 make build BOARD=nrf54l15dk
+make updater BOARD=nrf54l15dk
 ```
+
+`make build` produces the bootloader. `make updater` builds the bootloader and
+then [samples/bootloader-updater](../samples/bootloader-updater/README.md) --
+an ordinary slot0 application that embeds that `mcuboot.bin` and, when booted,
+overwrites the `mcuboot` (boot) partition with it (a self-update of the
+bootloader). Its output, `build-<key>-updater/zephyr/zephyr.signed.bin`, is a
+hash-only mcuboot image you flash to slot0 (UF2 / serial recovery / debugger).
 
 Output lands in `build-nrf54l15dk/`:
 
