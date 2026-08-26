@@ -35,13 +35,35 @@ static struct {
 static struct uf2_cfg uf2_cfg;
 static const struct flash_area *target_fap;
 
+/* Write-block size of the target flash device. UF2 payloads are 256 bytes,
+ * but the last block of an image can be a shorter partial. Some flash drivers
+ * (e.g. Nordic RRAM) require both the write offset and length to be a
+ * multiple of the device's write-block size, so we round a partial payload up
+ * to that alignment. The UF2 block's data field is zero-padded past
+ * payload_size, so the extra bytes read as 0 and land in the image's trailing
+ * padding inside the slot (harmless: they are overwritten when a real app
+ * is later loaded). 1 means "any length/offset accepted" (the no-op case).
+ */
+static size_t uf2_write_block_size = 1;
+
 /* Flash callbacks for write/erase (target slot via flash_area) */
 static int uf2_flash_write(uint32_t offset, const void *data, uint32_t len,
 			   void *ctx)
 {
 	const struct flash_area *fap = ctx;
+	uint32_t aligned_len = len;
 
-	return flash_area_write(fap, offset, data, len);
+	if (uf2_write_block_size > 1) {
+		uint32_t mask = uf2_write_block_size - 1;
+
+		aligned_len = (aligned_len + mask) & ~mask;
+		/* Never write past the end of the flash area. */
+		if (offset + aligned_len > fap->fa_size) {
+			aligned_len = len;
+		}
+	}
+
+	return flash_area_write(fap, offset, data, aligned_len);
 }
 
 static int uf2_flash_erase(uint32_t offset, uint32_t len, void *ctx)
@@ -183,8 +205,20 @@ int uf2_disk_register(void)
 	if (flash_dev != NULL) {
 		const struct flash_parameters *params =
 			flash_get_parameters(flash_dev);
-		if (params != NULL && params->erase_value != 0xFF) {
-			/* Some devices might not have standard erase */
+		if (params != NULL) {
+			if (params->erase_value != 0xFF) {
+				/* Some devices might not have standard erase */
+			}
+			/* UF2 payloads are 256 bytes but the last block of an
+			 * image can be a shorter partial; round writes up to the
+			 * device's write-block size so drivers that require
+			 * aligned writes (e.g. Nordic RRAM, which rejects a
+			 * 168-byte trailing payload with -EINVAL) accept it.
+			 * The UF2 block's data field is zero-padded past
+			 * payload_size, so the extra bytes land in the image's
+			 * trailing padding inside the slot.
+			 */
+			uf2_write_block_size = params->write_block_size;
 		}
 	}
 	/* Use a safe default erase size */
