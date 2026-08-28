@@ -23,14 +23,12 @@ import lzma
 import re
 import struct
 import sys
-from pathlib import Path
 
 import click
 
 import imgtool.keys as keys
 from imgtool import image, imgtool_version
 from imgtool.dumpinfo import dump_imginfo
-from imgtool.uf2conv import bin_to_uf2
 from imgtool.version import decode_version
 
 from .keys import ECDSAUsageError, Ed25519UsageError, RSAUsageError, X25519UsageError
@@ -75,17 +73,6 @@ def gen_x25519(keyfile, passwd):
 valid_langs = ['c', 'rust']
 valid_hash_encodings = ['lang-c', 'raw']
 valid_encodings = ['lang-c', 'lang-rust', 'pem', 'raw']
-
-
-def _validate_name_suffix(ctx: click.Context, param: click.Parameter, value: str) -> str:
-    if value and not re.match(r"^[A-Za-z0-9_]*$", value):
-        raise click.BadParameter(
-            f"{value!r} must contain only [A-Za-z0-9_]; it is appended "
-            f"directly to a C/Rust identifier."
-        )
-    return value
-
-
 keygens = {
     'rsa-2048':   gen_rsa2048,
     'rsa-3072':   gen_rsa3072,
@@ -153,28 +140,18 @@ def keygen(type, key, password):
 @click.option('-e', '--encoding', metavar='encoding',
               type=click.Choice(valid_encodings),
               help='Valid encodings: {}'.format(', '.join(valid_encodings)))
-@click.option('--name-suffix', 'name_suffix', metavar='SUFFIX', default='',
-              callback=_validate_name_suffix,
-              help='Append SUFFIX to the emitted C/Rust symbol names '
-                   '(e.g. `--name-suffix _2` emits `rsa_pub_key_2` / '
-                   '`rsa_pub_key_2_len`). Useful when embedding multiple '
-                   'signing keys in the same image. Ignored for PEM/raw '
-                   'encodings (those emit no identifiers).')
 @click.option('-k', '--key', metavar='filename', required=True)
 @click.option('-o', '--output', metavar='output', required=False,
               help='Specify the output file\'s name. \
                     The stdout is used if it is not provided.')
 @click.command(help='Dump public key from keypair')
-def getpub(key, encoding, lang, output, name_suffix):
+def getpub(key, encoding, lang, output):
     if encoding and lang:
         raise click.UsageError('Please use only one of `--encoding/-e` or `--lang/-l`')
     elif not encoding and not lang:
         # Preserve old behavior defaulting to `c`. If `lang` is removed,
         # `default=valid_encodings[0]` should be added to `-e` param.
         lang = valid_langs[0]
-    if name_suffix and (encoding in ('pem', 'raw')):
-        raise click.UsageError(
-            '`--name-suffix` is only meaningful for lang-c / lang-rust encodings')
     key = load_key(key)
 
     if not output:
@@ -182,9 +159,9 @@ def getpub(key, encoding, lang, output, name_suffix):
     if key is None:
         print("Invalid passphrase")
     elif lang == 'c' or encoding == 'lang-c':
-        key.emit_c_public(file=output, name_suffix=name_suffix)
+        key.emit_c_public(file=output)
     elif lang == 'rust' or encoding == 'lang-rust':
-        key.emit_rust_public(file=output, name_suffix=name_suffix)
+        key.emit_rust_public(file=output)
     elif encoding == 'pem':
         key.emit_public_pem(file=output)
     elif encoding == 'raw':
@@ -199,21 +176,14 @@ def getpub(key, encoding, lang, output, name_suffix):
                    'Default value is {}.'
                    .format(', '.join(valid_hash_encodings),
                            valid_hash_encodings[0]))
-@click.option('--name-suffix', 'name_suffix', metavar='SUFFIX', default='',
-              callback=_validate_name_suffix,
-              help='Append SUFFIX to the emitted C symbol names (lang-c '
-                   'encoding only). Ignored for raw encoding.')
 @click.option('-k', '--key', metavar='filename', required=True)
 @click.option('-o', '--output', metavar='output', required=False,
               help='Specify the output file\'s name. \
                     The stdout is used if it is not provided.')
 @click.command(help='Dump the SHA256 hash of the public key')
-def getpubhash(key, output, encoding, name_suffix):
+def getpubhash(key, output, encoding):
     if not encoding:
         encoding = valid_hash_encodings[0]
-    if name_suffix and encoding == 'raw':
-        raise click.UsageError(
-            '`--name-suffix` is only meaningful for the lang-c encoding')
     key = load_key(key)
 
     if not output:
@@ -221,39 +191,11 @@ def getpubhash(key, output, encoding, name_suffix):
     if key is None:
         print("Invalid passphrase")
     elif encoding == 'lang-c':
-        key.emit_c_public_hash(file=output, name_suffix=name_suffix)
+        key.emit_c_public_hash(file=output)
     elif encoding == 'raw':
         key.emit_raw_public_hash(file=output)
     else:
         raise click.UsageError()
-
-
-@click.option('--require', 'require', type=click.Choice(['private', 'public']),
-              default=None,
-              help='Exit non-zero if the key kind does not match REQUIRE. '
-                   'Without this option, keyinfo always exits 0 and prints '
-                   'the detected kind on stdout.')
-@click.option('-k', '--key', metavar='filename', required=True)
-@click.command(help='Print whether KEY is a keypair PEM (`private`) or a '
-                    'public-only PEM (`public`). Intended for build-system '
-                    'use: pair with `--require` to gate the build on the '
-                    'expected key kind.')
-def keyinfo(key, require):
-    loaded = keys.load(key)
-    if loaded is None:
-        raise click.UsageError(
-            f"Cannot inspect {key}: key is password-protected or unreadable. "
-            f"keyinfo runs non-interactively and does not prompt for a "
-            f"passphrase."
-        )
-    kind = ('private'
-            if isinstance(loaded, (keys.PayloadSigner, keys.DigestSigner))
-            else 'public')
-    click.echo(kind)
-    if require is not None and kind != require:
-        raise click.UsageError(
-            f"Key {key} is {kind}, but {require} was required."
-        )
 
 
 @click.option('--minimal', default=False, is_flag=True,
@@ -308,16 +250,15 @@ def verify(key, imgfile):
 
 @click.argument('imgfile')
 @click.option('-o', '--outfile', metavar='filename', required=False,
-              help='Save image information to outfile')
-@click.option('-f', '--format', 'output_format',
-              type=click.Choice(['human', 'yaml', 'json']),
-              help='Output format (human, yaml, json). Default: human for stdout, yaml for file')
+              help='Save image information to outfile in YAML format')
 @click.option('-s', '--silent', default=False, is_flag=True,
               help='Do not print image information to output')
 @click.command(help='Print header, TLV area and trailer information '
                     'of a signed image')
-def dumpinfo(imgfile, outfile, output_format, silent):
-    dump_imginfo(imgfile, outfile, output_format, silent)
+def dumpinfo(imgfile, outfile, silent):
+    dump_imginfo(imgfile, outfile, silent)
+    if not silent:
+        print("dumpinfo has run successfully")
 
 
 def validate_version(ctx, param, value):
@@ -402,12 +343,6 @@ class BasedIntParamType(click.ParamType):
                    'Add "0x" prefix if the value should be interpreted as an '
                    'integer, otherwise it will be interpreted as a string. '
                    'Specify the option multiple times to add multiple TLVs.')
-@click.option('--custom-tlv-file', required=False, nargs=2, default=[],
-              multiple=True, metavar='[tag] [filename]',
-              help='Custom TLV that will be placed into protected area. '
-                   'The second argument is the path to a binary file '
-                   'containing the TLV data. Specify the option multiple '
-                   'times to add multiple TLVs.')
 @click.option('-R', '--erased-val', type=click.Choice(['0', '0xff']),
               required=False,
               help='The value that is read back from erased flash.')
@@ -519,7 +454,7 @@ def sign(key, public_key_format, align, version, pad_sig, header_size,
          pad_header, slot_size, pad, confirm, test, max_sectors, overwrite_only,
          endian, encrypt_keylen, encrypt, compression, infile, outfile,
          dependencies, load_addr, hex_addr, erased_val, save_enctlv,
-         security_counter, boot_record, custom_tlv, custom_tlv_file, rom_fixed, max_align,
+         security_counter, boot_record, custom_tlv, rom_fixed, max_align,
          clear, fix_sig, fix_sig_pubkey, sig_out, user_sha, hmac_sha, is_pure,
          vector_to_sign, non_bootable, vid, cid):
 
@@ -538,11 +473,6 @@ def sign(key, public_key_format, align, version, pad_sig, header_size,
     compression_tlvs = {}
     img.load(infile)
     key = load_key(key) if key else None
-    if key is not None and not isinstance(key, (keys.PayloadSigner, keys.DigestSigner)):
-        raise click.UsageError(
-            "Cannot sign with a public-only PEM; signing requires the "
-            "private key."
-        )
     enckey = load_key(encrypt) if encrypt else None
     if enckey and key and ((isinstance(key, keys.ECDSA256P1) and
          not isinstance(enckey, keys.ECDSA256P1Public))
@@ -559,8 +489,7 @@ def sign(key, public_key_format, align, version, pad_sig, header_size,
 
     # Get list of custom protected TLVs from the command-line
     custom_tlvs = {}
-    custom_tlv_args = list(custom_tlv) + [(tag, Path(fn)) for tag, fn in custom_tlv_file]
-    for tlv in custom_tlv_args:
+    for tlv in custom_tlv:
         tag = int(tlv[0], 0)
         if tag in custom_tlvs:
             raise click.UsageError(f'Custom TLV {hex(tag)} already exists.')
@@ -569,10 +498,7 @@ def sign(key, public_key_format, align, version, pad_sig, header_size,
                 f'Custom TLV {hex(tag)} conflicts with predefined TLV.')
 
         value = tlv[1]
-        if isinstance(value, Path):
-            with value.open("rb") as fp:
-                custom_tlvs[tag] = fp.read()
-        elif value.startswith('0x'):
+        if value.startswith('0x'):
             if len(value[2:]) % 2:
                 raise click.UsageError('Custom TLV length is odd.')
             custom_tlvs[tag] = bytes.fromhex(value[2:])
@@ -664,34 +590,6 @@ def sign(key, public_key_format, align, version, pad_sig, header_size,
         save_signature(sig_out, new_signature)
 
 
-@click.argument('outfile')
-@click.argument('infile')
-@click.option('-b', '--base-addr', type=BasedIntParamType(), required=True,
-              help='Target base address for the image in flash.')
-@click.option('-f', '--family-id', type=BasedIntParamType(), default=0,
-              help='UF2 family ID (default: 0, accept any).')
-@click.option('--board-id', type=str, default=None,
-              help='Per-board identity string to embed in each UF2 block '
-                   'as a UF2 extension tag (e.g. adafruit_myboard). '
-                   'Omit to skip the board check.')
-@click.option('-p', '--payload-size', type=int, default=256,
-              help='Bytes of payload per UF2 block (default: 256).')
-@click.command(help='Convert a binary image (e.g. signed MCUboot image) to UF2 format')
-def uf2(infile, outfile, base_addr, family_id, board_id, payload_size):
-    with open(infile, 'rb') as f:
-        data = f.read()
-
-    uf2_data = bin_to_uf2(data, base_addr, family_id=family_id,
-                          payload_size=payload_size, board_id=board_id)
-
-    with open(outfile, 'wb') as f:
-        f.write(uf2_data)
-
-    num_blocks = len(uf2_data) // 512
-    print(f"Converted {len(data)} bytes to {num_blocks} UF2 blocks "
-          f"({len(uf2_data)} bytes), base address {base_addr:#010x}")
-
-
 class AliasesGroup(click.Group):
 
     _aliases = {
@@ -727,12 +625,10 @@ imgtool.add_command(keygen)
 imgtool.add_command(getpub)
 imgtool.add_command(getpubhash)
 imgtool.add_command(getpriv)
-imgtool.add_command(keyinfo)
 imgtool.add_command(verify)
 imgtool.add_command(sign)
 imgtool.add_command(version)
 imgtool.add_command(dumpinfo)
-imgtool.add_command(uf2)
 
 
 if __name__ == '__main__':
