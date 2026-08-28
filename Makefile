@@ -177,6 +177,8 @@ updater:
 #
 # The base/family are computed inside the recipe (shell `$$()`, not Make's
 # `$(shell)`) so they read the build dirs *after* `updater` has populated them.
+# Conversion uses the vendored upstream uf2conv.py (tools/uf2conv.py, from
+# microsoft/uf2); `-c` makes it write a file instead of flashing a drive.
 #
 # Output:
 #   $(UPDATER)/mcuboot-updater.uf2   (drag this onto the UF2 drive)
@@ -187,8 +189,9 @@ uf2:
 	@base=$$(python3 $(ADABOOT_DIR)/tools/uf2_updater.py base $(UPDATER)); \
 	 family=$$(python3 $(ADABOOT_DIR)/tools/uf2_updater.py family $(BUILD)); \
 	 echo "==> Converting $(BOARD) updater to UF2 (base $$base, family $$family)"; \
-	 python3 $(ADABOOT_DIR)/scripts/imgtool.py uf2 --base-addr $$base --family-id $$family \
-	   $(UPDATER)/zephyr/zephyr.signed.bin $(UPDATER)/zephyr.signed.uf2; \
+	 python3 $(ADABOOT_DIR)/tools/uf2conv.py -c -b $$base -f $$family \
+	   -o $(UPDATER)/zephyr.signed.uf2 \
+	   $(UPDATER)/zephyr/zephyr.signed.bin; \
 	 cp $(UPDATER)/zephyr.signed.uf2 $(UPDATER)/mcuboot-updater.uf2; \
 	 echo "==> $(UPDATER)/mcuboot-updater.uf2  (drag onto the UF2 drive to self-update the bootloader)"
 

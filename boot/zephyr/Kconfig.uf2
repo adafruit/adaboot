@@ -37,7 +37,7 @@ config MCUBOOT_UF2_BOARD_ID
 	  in a UF2 extension tag (flag 0x00008000) right after its payload;
 	  blocks with a non-matching (or absent) board identity are silently
 	  ignored. Use a distinct value per board variant. Embed it in images
-	  with `imgtool uf2 --board-id adafruit_myboard ...`.
+	  with `tools/uf2conv.py --ext 0x4D7C3A:adafruit_myboard ...`.
 
 	  Note: this is a safeguard against accidental cross-board flashes, not
 	  a security boundary. The board identity is not cryptographically

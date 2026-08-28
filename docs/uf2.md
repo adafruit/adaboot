@@ -69,18 +69,27 @@ In both cases, the UF2 file must contain a complete, signed MCUboot image
 ## Creating UF2 files
 
 Use ``imgtool`` to sign your firmware, then convert the signed image to UF2
-format with a standalone UF2 converter (for example the
-[``uf2conv``](https://github.com/microsoft/uf2/tree/master/utils) script from
-the UF2 project):
+format with the upstream ``uf2conv.py`` converter (vendored at
+``tools/uf2conv.py`` from the
+`microsoft/uf2 <https://github.com/microsoft/uf2>`_ project):
 
 ``` console
 # 1. Sign the image as usual
 imgtool sign -k my_key.pem --align 4 -v 1.0.0 -H 0x200 -S 0x60000 \
     app.bin signed.bin
 
-# 2. Convert to UF2
-uf2conv.py -b 0x10000 -f 0xADA32D -o firmware.uf2 signed.bin
+# 2. Convert to UF2 (use -c so it writes a file instead of flashing a drive)
+python3 tools/uf2conv.py -c -b 0x10000 -f 0xADA32D \
+    -o firmware.uf2 signed.bin
 ```
+### uf2conv.py options
+
+| Option | Description |
+|--------|-------------|
+| ``-b`` / ``--base`` | Target base address for the image in flash (default: ``0x2000``) |
+| ``-f`` / ``--family`` | UF2 family ID (number or name); ``0`` skips the family check (default: ``0x0``) |
+| ``-o`` / ``--output`` | Output file path |
+| ``-c`` / ``--convert`` | Convert only; write the file and do not try to flash a mounted drive |
 
 The base address should match the start of the target flash slot (primary for
 single-slot, secondary for dual-slot).
@@ -88,6 +97,47 @@ single-slot, secondary for dual-slot).
 The family ID is an optional safeguard. When both the UF2 file and the
 bootloader specify a non-zero family ID, blocks with a mismatched ID are
 silently ignored.
+
+### Binding images to a board (board identity)
+
+The family ID (``-f`` / ``CONFIG_MCUBOOT_UF2_FAMILY_ID``) is shared
+across an entire product line. To bind a UF2 file to a **specific board
+variant**, use the board identity (``CONFIG_MCUBOOT_UF2_BOARD_ID``):
+a ``<vendor>_<board>`` string, one value per board. The bootloader accepts a
+block only when its board identity matches, so firmware built for one board is
+silently ignored on another.
+
+Embed the board identity with the converter's ``--ext`` option, using the
+Adaboot board-id tag type ``0x4D7C3A``:
+
+``` console
+python3 tools/uf2conv.py -c -b 0x10000 -f 0xADA32D \
+    --ext 0x4D7C3A:adafruit_feather_nrf52840 \
+    -o firmware.uf2 signed.bin
+```
+
+and in the board's bootloader config:
+
+``` cfg
+CONFIG_MCUBOOT_UF2_FAMILY_ID=0xADA32D
+CONFIG_MCUBOOT_UF2_BOARD_ID="adafruit_feather_nrf52840"
+```
+
+The board identity is carried as a [UF2 extension tag](https://github.com/microsoft/uf2#extension-tags)
+(official flag ``0x00008000``, no new top-level flag). Each UF2 block carries
+one board-identity tag — a 24-bit type (Adaboot's ``0x4D7C3A``, chosen at
+random outside the standard set) plus a UTF-8 ``<vendor>_<board>`` payload —
+right after the payload, terminated by a 4-byte zero record. The bootloader
+parses the tags in ``uf2_process_block`` and rejects blocks whose board
+identity does not match ``CONFIG_MCUBOOT_UF2_BOARD_ID``. Leave the config
+empty (and omit ``--ext``) to disable the check.
+
+> **Note:** because Adaboot does not verify image signatures
+(``CONFIG_BOOT_SIGNATURE_TYPE_NONE``), the board identity is a safeguard
+against **accidental** cross-board flashes, not a security boundary. A
+``.uf2`` can be edited, or the raw binary flashed over SWD/JTAG, to bypass it.
+(A re-flash via ``CURRENT.UF2`` readback does carry the board identity, so a
+same-board backup restores cleanly.)
 
 ## Enabling UF2 mode (Zephyr)
 

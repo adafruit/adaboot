@@ -14,7 +14,7 @@ list
 
 base <updater-build-dir>
     Print the slot0 flash offset (``fa_off``) the UF2 bootloader writes
-    incoming blocks at -- i.e. the ``--base-addr`` to give ``imgtool uf2``.
+    incoming blocks at -- i.e. the ``-b``/``--base`` to give ``tools/uf2conv.py``.
     Parsed from ``<updater-build-dir>/zephyr/edt.pickle`` (the same EDT Zephyr
     generated for the build) so it always matches what the bootloader actually
     uses (``target_fap->fa_off``), no matter how the partition is mapped.
