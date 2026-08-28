@@ -196,6 +196,7 @@ int uf2_disk_register(void)
 	uf2_cfg.flash_base = target_fap->fa_off;
 	uf2_cfg.flash_size = target_fap->fa_size;
 	uf2_cfg.family_id = CONFIG_MCUBOOT_UF2_FAMILY_ID;
+	uf2_cfg.board_id = CONFIG_MCUBOOT_UF2_BOARD_ID;
 
 	/* Use the flash device's erase block size.
 	 * Default to 4096 if we can't determine it.

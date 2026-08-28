@@ -670,15 +670,19 @@ def sign(key, public_key_format, align, version, pad_sig, header_size,
               help='Target base address for the image in flash.')
 @click.option('-f', '--family-id', type=BasedIntParamType(), default=0,
               help='UF2 family ID (default: 0, accept any).')
+@click.option('--board-id', type=str, default=None,
+              help='Per-board identity string to embed in each UF2 block '
+                   'as a UF2 extension tag (e.g. adafruit_myboard). '
+                   'Omit to skip the board check.')
 @click.option('-p', '--payload-size', type=int, default=256,
               help='Bytes of payload per UF2 block (default: 256).')
 @click.command(help='Convert a binary image (e.g. signed MCUboot image) to UF2 format')
-def uf2(infile, outfile, base_addr, family_id, payload_size):
+def uf2(infile, outfile, base_addr, family_id, board_id, payload_size):
     with open(infile, 'rb') as f:
         data = f.read()
 
     uf2_data = bin_to_uf2(data, base_addr, family_id=family_id,
-                          payload_size=payload_size)
+                          payload_size=payload_size, board_id=board_id)
 
     with open(outfile, 'wb') as f:
         f.write(uf2_data)
