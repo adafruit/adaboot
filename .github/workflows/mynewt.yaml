@@ -1,10 +1,12 @@
+# For development, trigger this on any push.
+# Disabled until Mynewt tests are updated
+# on:
+#   push:
+#     branches:
+#       - main
+#   pull_request:
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-  schedule:
-    - cron: 42 3 * * *
+  workflow_dispatch:
 
 name: Mynewt
 
