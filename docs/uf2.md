@@ -86,6 +86,7 @@ imgtool uf2 --base-addr 0x10000 --family-id 0xADA32D signed.bin firmware.uf2
 |--------|-------------|
 | ``-b`` / ``--base-addr`` | Target base address for the image in flash (required) |
 | ``-f`` / ``--family-id`` | UF2 family ID; set to 0 to skip family check (default: 0) |
+| ``--board-id`` | Per-board identity string (e.g. ``adafruit_myboard``); omit to skip the board check |
 | ``-p`` / ``--payload-size`` | Bytes of payload per UF2 block (default: 256) |
 
 The base address should match the start of the target flash slot (primary for
@@ -94,6 +95,43 @@ single-slot, secondary for dual-slot).
 The family ID is an optional safeguard. When both the UF2 file and the
 bootloader specify a non-zero family ID, blocks with a mismatched ID are
 silently ignored.
+
+### Binding images to a board (board identity)
+
+The family ID (``--family-id`` / ``CONFIG_MCUBOOT_UF2_FAMILY_ID``) is shared
+across an entire product line. To bind a UF2 file to a **specific board
+variant**, use the board identity (``--board-id`` / ``CONFIG_MCUBOOT_UF2_BOARD_ID``):
+a ``<vendor>_<board>`` string, one value per board. The bootloader accepts a
+block only when its board identity matches, so firmware built for one board is
+silently ignored on another.
+
+``` console
+imgtool uf2 --base-addr 0x10000 --family-id 0xADA32D \
+    --board-id adafruit_feather_nrf52840 app.bin firmware.uf2
+```
+
+and in the board's bootloader config:
+
+``` cfg
+CONFIG_MCUBOOT_UF2_FAMILY_ID=0xADA32D
+CONFIG_MCUBOOT_UF2_BOARD_ID="adafruit_feather_nrf52840"
+```
+
+The board identity is carried as a [UF2 extension tag](https://github.com/microsoft/uf2#extension-tags)
+(official flag ``0x00008000``, no new top-level flag). Each UF2 block carries
+one board-identity tag — a 24-bit type (Adaboot's ``0x4D7C3A``, chosen at
+random outside the standard set) plus a UTF-8 ``<vendor>_<board>`` payload —
+right after the payload, terminated by a 4-byte zero record. The bootloader
+parses the tags in ``uf2_process_block`` and rejects blocks whose board
+identity does not match ``CONFIG_MCUBOOT_UF2_BOARD_ID``. Leave the config
+empty (and omit ``--board-id``) to disable the check.
+
+> **Note:** because Adaboot does not verify image signatures
+(``CONFIG_BOOT_SIGNATURE_TYPE_NONE``), the board identity is a safeguard
+against **accidental** cross-board flashes, not a security boundary. A
+``.uf2`` can be edited, or the raw binary flashed over SWD/JTAG, to bypass it.
+(A re-flash via ``CURRENT.UF2`` readback does carry the board identity, so a
+same-board backup restores cleanly.)
 
 ## Enabling UF2 mode (Zephyr)
 
@@ -147,6 +185,7 @@ west build -b <your_board> boot/zephyr -- \
 |----------------|------|---------|-------------|
 | ``MCUBOOT_UF2`` | bool | n | Enable UF2 drag-and-drop update mode |
 | ``MCUBOOT_UF2_FAMILY_ID`` | hex | 0x0 | UF2 family ID to accept (0 = any) |
+| ``MCUBOOT_UF2_BOARD_ID`` | string | "" | Per-board identity to accept ("<vendor>_<board>"; empty = any) |
 | ``MCUBOOT_UF2_BOARD_NAME`` | string | ``BOARD`` | Board name shown in INFO_UF2.TXT |
 | ``MCUBOOT_UF2_BOARD_URL`` | string | ``https://mcuboot.com`` | URL for INDEX.HTM redirect |
 | ``MCUBOOT_UF2_DISK_NAME`` | string | ``UF2`` | Disk name (must match ``MASS_STORAGE_DISK_NAME``) |

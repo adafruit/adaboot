@@ -22,7 +22,26 @@ config MCUBOOT_UF2_FAMILY_ID
 	help
 	  UF2 family ID to accept. Set to 0 to accept any family.
 	  UF2 blocks with a non-matching family ID will be silently
-	  ignored.
+	  ignored. This is shared across an entire product line /
+	  implementation.
+
+config MCUBOOT_UF2_BOARD_ID
+	string "UF2 board identity"
+	default ""
+	help
+	  Per-board identity string to accept, of the form
+	  "<vendor>_<board>" (e.g. "adafruit_feather_nrf52840").
+	  Leave empty to accept any board.
+
+	  When non-empty, each UF2 block must carry a matching board identity
+	  in a UF2 extension tag (flag 0x00008000) right after its payload;
+	  blocks with a non-matching (or absent) board identity are silently
+	  ignored. Use a distinct value per board variant. Embed it in images
+	  with `imgtool uf2 --board-id adafruit_myboard ...`.
+
+	  Note: this is a safeguard against accidental cross-board flashes, not
+	  a security boundary. The board identity is not cryptographically
+	  protected unless images are signed.
 
 config MCUBOOT_UF2_USB_VID
 	hex "USB Vendor ID for UF2 drive"

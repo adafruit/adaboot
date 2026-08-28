@@ -67,6 +67,56 @@ int uf2_process_block(const struct uf2_cfg *cfg, struct uf2_state *state,
 		}
 	}
 
+	/* Check board ID if configured. The board_id is a UTF-8 string of the
+	 * form "<vendor>_<board>" carried in a UF2 extension tag
+	 * (flag UF2_FLAG_EXTENSION_TAGS) right after the payload. This mirrors
+	 * the family_id check but binds the image to a specific board variant.
+	 */
+	if (cfg->board_id != NULL && cfg->board_id[0] != '\0') {
+		size_t want_len = strlen(cfg->board_id);
+		bool match = false;
+
+		if (block->flags & UF2_FLAG_EXTENSION_TAGS) {
+			uint32_t off = block->payload_size;
+
+			while (off + 4 <= UF2_DATA_SIZE) {
+				uint8_t sz = block->data[off];
+
+				/* Terminator: size 0, type 0. */
+				if (sz == 0) {
+					break;
+				}
+
+				/* Malformed: need at least the 4-byte header,
+				 * and the record must fit in the data field.
+				 */
+				if (sz < 4 || off + sz > UF2_DATA_SIZE) {
+					break;
+				}
+
+				if (block->data[off + 1] == UF2_EXT_TAG_BOARD_ID_B0 &&
+				    block->data[off + 2] == UF2_EXT_TAG_BOARD_ID_B1 &&
+				    block->data[off + 3] == UF2_EXT_TAG_BOARD_ID_B2) {
+					uint8_t plen = (uint8_t)(sz - 4);
+
+					if (plen == want_len &&
+					    memcmp(&block->data[off + 4],
+					           cfg->board_id, want_len) == 0) {
+						match = true;
+					}
+					break; /* board tag found (match or not) */
+				}
+
+				/* Advance past this padded record. */
+				off += ((uint32_t)sz + 3u) & ~3u;
+			}
+		}
+
+		if (!match) {
+			return 0; /* Wrong board, silently ignore */
+		}
+	}
+
 	/* Validate block numbers */
 	if (block->num_blocks == 0 || block->block_no >= block->num_blocks) {
 		return -1;

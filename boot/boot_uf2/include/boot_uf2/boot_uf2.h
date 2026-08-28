@@ -21,11 +21,32 @@ extern "C" {
 #define UF2_MAGIC_END     0x0AB16F30u
 
 /* UF2 flags */
-#define UF2_FLAG_FAMILY_ID  0x00002000u
+#define UF2_FLAG_FAMILY_ID       0x00002000u
+#define UF2_FLAG_EXTENSION_TAGS  0x00008000u
 
 /* UF2 block size is always 512 bytes */
 #define UF2_BLOCK_SIZE     512
 #define UF2_PAYLOAD_SIZE   256
+#define UF2_DATA_SIZE      476
+
+/*
+ * UF2 extension tags (flag UF2_FLAG_EXTENSION_TAGS) carry additional
+ * metadata in the data padding right after the payload. Each tag is
+ * [size:1][type:3 LE][payload], padded to a 4-byte boundary, terminated
+ * by a 4-byte zero record. See the UF2 spec.
+ *
+ * Adaboot defines a board-identity extension tag whose payload is a
+ * UTF-8 string of the form "<vendor>_<board>" (e.g.
+ * "adafruit_feather_nrf52840"), one value per board variant. The tag
+ * type is a random 24-bit value chosen outside the standard set
+ * (0x9fc7bc, 0x650d9d, 0x0be9f7, 0xb46db0, 0xc8a729), per the spec's
+ * guidance to pick custom tags at random.
+ */
+#define UF2_EXT_TAG_BOARD_ID      0x4D7C3Au
+/* Type bytes in little-endian on-wire order (type 0x4D7C3A -> 3A 7C 4D). */
+#define UF2_EXT_TAG_BOARD_ID_B0  ((UF2_EXT_TAG_BOARD_ID >> 0)  & 0xFFu) /* 0x3A */
+#define UF2_EXT_TAG_BOARD_ID_B1  ((UF2_EXT_TAG_BOARD_ID >> 8)  & 0xFFu) /* 0x7C */
+#define UF2_EXT_TAG_BOARD_ID_B2  ((UF2_EXT_TAG_BOARD_ID >> 16) & 0xFFu) /* 0x4D */
 
 /**
  * @brief UF2 block structure (512 bytes)
@@ -62,6 +83,7 @@ struct uf2_cfg {
 	uint32_t flash_base;
 	uint32_t flash_size;
 	uint32_t family_id;
+	const char *board_id;
 	uint32_t erase_size;
 	const char *board_name;
 	const char *board_url;

@@ -311,7 +311,9 @@ static void build_current_uf2_block(const struct uf2_cfg *cfg, uint8_t *buf,
 	/* UF2 header (bytes 0-31) */
 	write_u32_le(&buf[0], UF2_MAGIC_START0);
 	write_u32_le(&buf[4], UF2_MAGIC_START1);
-	write_u32_le(&buf[8], cfg->family_id ? UF2_FLAG_FAMILY_ID : 0);
+	write_u32_le(&buf[8], (cfg->family_id ? UF2_FLAG_FAMILY_ID : 0)
+			  | ((cfg->board_id && cfg->board_id[0]) ?
+			     UF2_FLAG_EXTENSION_TAGS : 0));
 	write_u32_le(&buf[12], cfg->readback_base + offset);
 	write_u32_le(&buf[16], payload_len);
 	write_u32_le(&buf[20], block_index);
@@ -320,6 +322,28 @@ static void build_current_uf2_block(const struct uf2_cfg *cfg, uint8_t *buf,
 
 	/* Payload (bytes 32 .. 32+payload_len-1): read from flash */
 	cfg->read(offset, &buf[32], payload_len, cfg->read_ctx);
+
+	/* Board identity as a UF2 extension tag (flag UF2_FLAG_EXTENSION_TAGS),
+	 * placed right after the payload so a CURRENT.UF2 readback is
+	 * byte-for-byte re-flashable on the same board. The data region
+	 * beyond the payload is already zeroed by the memset above, so the
+	 * tag's padding and the 4-byte zero terminator are implicit.
+	 */
+	if (cfg->board_id != NULL && cfg->board_id[0] != '\0') {
+		size_t blen = strlen(cfg->board_id);
+		uint32_t ext_off = 32 + payload_len;
+		uint8_t sz = (uint8_t)(4 + blen);
+		uint32_t padded = ((uint32_t)sz + 3u) & ~3u;
+
+		/* Guard: record + 4-byte terminator must fit before magic_end. */
+		if (blen <= 251 && ext_off + padded + 4 <= 508) {
+			buf[ext_off] = sz;
+			buf[ext_off + 1] = UF2_EXT_TAG_BOARD_ID_B0;
+			buf[ext_off + 2] = UF2_EXT_TAG_BOARD_ID_B1;
+			buf[ext_off + 3] = UF2_EXT_TAG_BOARD_ID_B2;
+			memcpy(&buf[ext_off + 4], cfg->board_id, blen);
+		}
+	}
 
 	/* End magic (bytes 508-511) */
 	write_u32_le(&buf[508], UF2_MAGIC_END);
