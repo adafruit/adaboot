@@ -322,6 +322,14 @@ The USB device descriptors can be configured with the following Kconfig options:
 | ``CONFIG_BOOT_SERIAL_CDC_ACM_SELF_POWERED`` | ``n`` | Set the self-powered attribute in the USB configuration descriptor |
 | ``CONFIG_BOOT_SERIAL_CDC_ACM_MAX_POWER`` | ``125`` | ``bMaxPower`` value in the USB configuration descriptor, in 2 mA units (default: 250 mA) |
 
+When UF2 (``CONFIG_MCUBOOT_UF2``) is enabled as well, there is no separate serial
+recovery mode: any entrance method enters the single bootloader update mode
+where the UF2 mass storage drive and the CDC ACM serial recovery port are
+active at the same time on one USB device (see [UF2 Drag-and-Drop
+Update](uf2.md)). In that combined mode the USB device uses the UF2 identity
+(``CONFIG_MCUBOOT_UF2_USB_VID``/``PID`` and descriptors) and the descriptor
+options in the table above are unused.
+
 ### Entering the serial recovery mode
 
 To enter the serial recovery mode, the device has to initiate rebooting, and a triggering event has to occur (for example, pressing a button).

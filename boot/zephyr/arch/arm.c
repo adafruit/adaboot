@@ -20,9 +20,9 @@
 #include <zephyr/usb/usbd.h>
 #endif /* CONFIG_USB_DEVICE_STACK_NEXT */
 
-#ifdef CONFIG_BOOT_SERIAL_CDC_ACM
-#include "usbd_cdc_serial.h"
-#endif /* CONFIG_BOOT_SERIAL_CDC_ACM */
+#if defined(CONFIG_MCUBOOT_UF2) || defined(CONFIG_BOOT_SERIAL_CDC_ACM)
+#include "usbd_boot.h"
+#endif /* CONFIG_MCUBOOT_UF2 || CONFIG_BOOT_SERIAL_CDC_ACM */
 
 #if defined(CONFIG_BOOT_DISABLE_CACHES)
 #include <zephyr/cache.h>
@@ -103,16 +103,16 @@ void do_boot(const struct boot_rsp *rsp)
 	/* Disable the USB to prevent it from firing interrupts */
 	usb_disable();
 #endif
-#ifdef CONFIG_USB_DEVICE_STACK_NEXT
+#if defined(CONFIG_MCUBOOT_UF2) || defined(CONFIG_BOOT_SERIAL_CDC_ACM)
 	{
 		int usbd_rc;
 
-		usbd_rc = usbd_disable(boot_usb_cdc_serial_get_context());
-
-		/* -EALREADY is expected on normal boot: USB was never enabled
-		 * (lazy init -- only initialized when recovery is triggered).
-		 * Any other error indicates a real problem.
+		/* Disable the USB to prevent it from firing interrupts into
+		 * the application. -EALREADY is expected on normal boot: USB was
+		 * never enabled (lazy init -- only initialized when the update
+		 * mode is triggered). Any other error indicates a real problem.
 		 */
+		usbd_rc = boot_usb_disable();
 		if (usbd_rc != 0 && usbd_rc != -EALREADY) {
 			BOOT_LOG_WRN("USB disable failed: %d", usbd_rc);
 		}

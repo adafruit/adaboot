@@ -1,0 +1,11 @@
+manifest:
+  projects:
+    - name: zephyr
+      url: https://github.com/adafruit/zephyr
+      revision: 62e7a3764b652fff733cee43f23f82217403a51d
+      clone-depth: 100
+      path: zephyr
+      import:
+        path-prefix: deps
+        name-blocklist:
+          - mcuboot

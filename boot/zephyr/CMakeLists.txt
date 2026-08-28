@@ -312,6 +312,12 @@ if(CONFIG_MCUBOOT_UF2)
   )
 endif()
 
+if(CONFIG_MCUBOOT_UF2 OR CONFIG_BOOT_SERIAL_CDC_ACM)
+  # Unified USB device setup: one USBD context carries every USB-based
+  # update transport (UF2 mass storage and/or CDC ACM serial recovery).
+  zephyr_sources(usbd_boot.c)
+endif()
+
 if(CONFIG_MCUBOOT_SERIAL)
   zephyr_sources(
     ${BOOT_DIR}/zephyr/serial_adapter.c
@@ -339,10 +345,6 @@ if(CONFIG_MCUBOOT_SERIAL)
     if(CONFIG_BOOT_MGMT_CUSTOM_STORAGE_ERASE)
       zephyr_sources(boot_serial_extension_zephyr_basic.c)
     endif()
-  endif()
-
-  if(CONFIG_BOOT_SERIAL_CDC_ACM)
-    zephyr_sources(usbd_cdc_serial.c)
   endif()
 endif()
 

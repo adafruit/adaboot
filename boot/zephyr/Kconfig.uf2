@@ -14,6 +14,13 @@ menuconfig MCUBOOT_UF2
 	  MCUboot presents a USB Mass Storage device; users drag
 	  a .uf2 file onto it to update firmware.
 
+	  If serial recovery (CONFIG_MCUBOOT_SERIAL) is enabled as well, the
+	  bootloader runs a single combined update mode: entering the
+	  bootloader (by any enabled entrance method) activates both the
+	  UF2 mass storage drive and SMP over the serial recovery port at the
+	  same time, on one USB device. When the serial recovery port is CDC
+	  ACM, both share the UF2 USB identity (VID/PID and descriptors).
+
 if MCUBOOT_UF2
 
 config MCUBOOT_UF2_FAMILY_ID

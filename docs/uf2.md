@@ -24,15 +24,44 @@
 # UF2 Drag-and-Drop Update
 
 MCUboot supports firmware updates via [UF2](https://github.com/microsoft/uf2)
-drag-and-drop over USB. When UF2 mode is active, the device appears as a USB
-Mass Storage drive. Users copy a `.uf2` file onto the drive to update firmware.
+drag-and-drop over USB. When the bootloader update mode is active, the device
+appears as a USB Mass Storage drive. Users copy a `.uf2` file onto the drive
+to update firmware.
 
 This is the standard update mechanism used in the CircuitPython / Adafruit
 ecosystem and provides a simple, tool-free update experience.
 
+## Combined mode: UF2 + serial recovery
+
+When both UF2 (``CONFIG_MCUBOOT_UF2``) and serial recovery
+(``CONFIG_MCUBOOT_SERIAL``) are enabled, there is a **single** bootloader
+update mode, not two alternatives: entering the bootloader (button,
+double-tap, boot-mode request, or no valid application) activates both
+transports at the same time --
+
+- the UF2 drag-and-drop drive (USB Mass Storage), and
+- SMP (`mcumgr`) over the serial recovery port.
+
+When the serial recovery port is CDC ACM on the device's native USB
+controller (``CONFIG_BOOT_SERIAL_CDC_ACM``), both transports live on one
+composite USB device: the host sees the mass storage drive *and* the serial
+port simultaneously, sharing the UF2 USB identity
+(``CONFIG_MCUBOOT_UF2_USB_VID``/``PID``). A board opts into this by enabling
+both options and adding a ``zephyr,cdc-acm-uart`` node to its USB controller
+(see ``dts/nordic/nrf54lm20dk.dtsi`` and ``conf/nrf54lm20dk.conf`` for an
+example).
+
+While the update mode is active, incoming UF2 blocks and incoming serial
+commands are serviced concurrently; whichever transport receives a complete
+image first reboots the device to apply it.
+
+> **Note:** ``CONFIG_BOOT_SERIAL_WAIT_FOR_DFU`` is not available in the
+> combined UF2 + CDC ACM configuration; use one of the entrance methods
+> below instead.
+
 ## How it works
 
-UF2 mode presents a virtual FAT16 filesystem over USB Mass Storage. The
+The update mode presents a virtual FAT16 filesystem over USB Mass Storage. The
 filesystem is generated on the fly (a "ghost FAT") and contains:
 
 - **INFO_UF2.TXT** — board name and bootloader version
@@ -150,20 +179,20 @@ Add the following to your MCUboot configuration (or use the provided
 CONFIG_MCUBOOT_UF2=y
 CONFIG_MCUBOOT_UF2_NO_APPLICATION=y
 
-# Disk name must match
-CONFIG_MASS_STORAGE_DISK_NAME="UF2"
-
-# USB device descriptors
-CONFIG_USB_DEVICE_PRODUCT="MCUboot UF2"
-CONFIG_USB_DEVICE_VID=0x239A
-CONFIG_USB_DEVICE_PID=0x0035
+# USB identity of the bootloader device
+CONFIG_MCUBOOT_UF2_USB_VID=0x239A
+CONFIG_MCUBOOT_UF2_USB_PID=0x002F
 
 # USB requires a preemptible main thread
 CONFIG_MAIN_THREAD_PRIORITY=0
+
+# Optional: combine with SMP serial recovery over native USB
+# CONFIG_MCUBOOT_SERIAL=y
+# CONFIG_BOOT_SERIAL_CDC_ACM=y
 ```
 
-``CONFIG_MCUBOOT_UF2=y`` automatically selects ``USB_DEVICE_STACK``,
-``USB_MASS_STORAGE``, ``DISK_ACCESS``, and ``REBOOT``.
+``CONFIG_MCUBOOT_UF2=y`` automatically selects ``USB_DEVICE_STACK_NEXT``,
+``USBD_MSC_CLASS``, ``DISK_ACCESS``, and ``REBOOT``.
 
 ### Device tree overlay
 
@@ -194,7 +223,7 @@ west build -b <your_board> boot/zephyr -- \
 | ``MCUBOOT_UF2_BOARD_ID`` | string | "" | Per-board identity to accept ("<vendor>_<board>"; empty = any) |
 | ``MCUBOOT_UF2_BOARD_NAME`` | string | ``BOARD`` | Board name shown in INFO_UF2.TXT |
 | ``MCUBOOT_UF2_BOARD_URL`` | string | ``https://mcuboot.com`` | URL for INDEX.HTM redirect |
-| ``MCUBOOT_UF2_DISK_NAME`` | string | ``UF2`` | Disk name (must match ``MASS_STORAGE_DISK_NAME``) |
+| ``MCUBOOT_UF2_DISK_NAME`` | string | ``UF2`` | Disk name registered with disk_access (exposed as the MSC LUN) |
 | ``MCUBOOT_UF2_MAX_BLOCKS`` | int | 4096 | Max UF2 blocks (4096 = 1 MB max image) |
 | ``MCUBOOT_UF2_VALIDATE_AFTER_WRITE`` | bool | y | Validate image header after write completes |
 
@@ -202,15 +231,22 @@ west build -b <your_board> boot/zephyr -- \
 
 | Kconfig option | Description |
 |----------------|-------------|
-| ``MCUBOOT_UF2_ENTRANCE_GPIO`` | Enter UF2 mode when a GPIO pin is asserted at boot |
-| ``MCUBOOT_UF2_ENTRANCE_BOOT_MODE`` | Enter UF2 mode via the Zephyr boot mode retention subsystem |
-| ``MCUBOOT_UF2_NO_APPLICATION`` | Enter UF2 mode if no valid application is found |
+| ``MCUBOOT_UF2_ENTRANCE_GPIO`` | Enter the update mode when a GPIO pin is asserted at boot |
+| ``MCUBOOT_UF2_ENTRANCE_BOOT_MODE`` | Enter the update mode via the Zephyr boot mode retention subsystem |
+| ``MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP`` | Enter the update mode on a double tap of the reset button |
+| ``MCUBOOT_UF2_NO_APPLICATION`` | Enter the update mode if no valid application is found |
 
-Multiple entrance methods can be enabled simultaneously.
+Multiple entrance methods can be enabled simultaneously. When serial recovery
+(``CONFIG_MCUBOOT_SERIAL``) is enabled too, the *serial recovery* entrance
+methods (``BOOT_SERIAL_ENTRANCE_GPIO``, ``BOOT_SERIAL_DOUBLE_TAP``,
+``BOOT_SERIAL_BOOT_MODE``, ``BOOT_SERIAL_NO_APPLICATION``, ...) enter this
+same combined mode — there is no separate serial-only or UF2-only mode to
+choose between.
 
 ## Updating firmware
 
-1. Enter UF2 mode (GPIO button, boot mode request, or no application present).
+1. Enter the bootloader update mode (GPIO button, double-tap, boot-mode
+   request, or no application present).
 2. A USB drive named **UF2 BOOT** appears on your computer.
 3. Copy the `.uf2` file to the drive.
 4. The device automatically reboots into the new firmware.
@@ -264,6 +300,10 @@ library in ``boot/boot_uf2/`` and Zephyr integration in ``boot/zephyr/``:
 - **boot/boot_uf2/src/ghostfat.c** — Virtual FAT16 filesystem generation
 - **boot/zephyr/uf2_disk.c** — Zephyr ``disk_operations`` backend bridging
   the ghost FAT to flash via ``flash_area_*`` APIs
+- **boot/zephyr/usbd_boot.c** — the bootloader's single USB device setup:
+  one ``USBD`` context registers every enabled update transport class (the
+  UF2 mass storage LUN and/or the CDC ACM serial recovery port), so with
+  native USB both are active at once in one bootloader mode
 
-No custom USB code is needed — Zephyr's existing USB Mass Storage class handles
-all USB protocol details.
+No custom USB protocol code is needed — Zephyr's existing USB device stack
+and classes handle all USB details.

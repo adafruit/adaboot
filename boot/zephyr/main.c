@@ -47,6 +47,10 @@
 #include <zephyr/sys/reboot.h>
 #endif
 
+#if defined(CONFIG_MCUBOOT_UF2) || defined(CONFIG_BOOT_SERIAL_CDC_ACM)
+#include "usbd_boot.h"
+#endif
+
 #if defined(CONFIG_MCUBOOT_UUID_VID) || defined(CONFIG_MCUBOOT_UUID_CID)
 #include "bootutil/mcuboot_uuid.h"
 #endif /* CONFIG_MCUBOOT_UUID_VID || CONFIG_MCUBOOT_UUID_CID */
@@ -64,14 +68,6 @@ const struct boot_uart_funcs boot_funcs = {
 #if defined(CONFIG_BOOT_USB_DFU_WAIT) || defined(CONFIG_BOOT_USB_DFU_GPIO)
 #include <zephyr/usb/class/usb_dfu.h>
 #endif
-
-#ifdef CONFIG_USB_DEVICE_STACK_NEXT
-#include <zephyr/usb/usbd.h>
-#endif /* CONFIG_USB_DEVICE_STACK_NEXT */
-
-#ifdef CONFIG_BOOT_SERIAL_CDC_ACM
-#include "usbd_cdc_serial.h"
-#endif /* CONFIG_BOOT_SERIAL_CDC_ACM */
 
 #if defined(CONFIG_BOOT_SERIAL_UART) && defined(CONFIG_LOG_BACKEND_UART)
 #error "UART serial recovery and UART log backend cannot both be enabled"
@@ -174,11 +170,125 @@ void zephyr_boot_log_stop(void)
         * !defined(CONFIG_LOG_PROCESS_THREAD) && !defined(CONFIG_LOG_MODE_MINIMAL)
         */
 
+/*
+ * Bootloader update modes.
+ *
+ * When both serial recovery (CONFIG_MCUBOOT_SERIAL) and UF2
+ * (CONFIG_MCUBOOT_UF2) are enabled, there is a single bootloader mode:
+ * entering it (by any enabled entrance method) activates both transports
+ * at the same time -- UF2 drag-and-drop over USB Mass Storage and SMP over
+ * the serial recovery port. There are no two mutually exclusive modes.
+ */
+#if defined(CONFIG_MCUBOOT_SERIAL) && defined(CONFIG_MCUBOOT_UF2)
+#define MCUBOOT_UPDATE_MODE_COMBINED
+#endif
+
+/* Is any update-mode entrance method (serial or UF2) enabled? */
+#if defined(CONFIG_BOOT_SERIAL_ENTRANCE_GPIO) || defined(CONFIG_BOOT_SERIAL_PIN_RESET) \
+    || defined(CONFIG_BOOT_SERIAL_BOOT_MODE) || defined(CONFIG_BOOT_SERIAL_NO_APPLICATION) \
+    || defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP) || defined(CONFIG_MCUBOOT_UF2_ENTRANCE_GPIO) \
+    || defined(CONFIG_MCUBOOT_UF2_ENTRANCE_BOOT_MODE) \
+    || defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP) \
+    || defined(CONFIG_MCUBOOT_UF2_NO_APPLICATION)
+#define MCUBOOT_UPDATE_MODE_ENTERED
+#endif
+
+#if defined(MCUBOOT_UPDATE_MODE_COMBINED) && defined(MCUBOOT_UPDATE_MODE_ENTERED)
+
+K_THREAD_STACK_DEFINE(boot_serial_thread_stack,
+		      CONFIG_BOOT_SERIAL_UPDATE_THREAD_STACK_SIZE);
+static struct k_thread boot_serial_thread_data;
+
+/* Serial recovery runs in this thread while the main thread polls the
+ * UF2 drive; boot_serial_start() only returns on error, so the thread
+ * simply never exits. */
+static void boot_serial_thread_fn(void *arg1, void *arg2, void *arg3)
+{
+    ARG_UNUSED(arg1);
+    ARG_UNUSED(arg2);
+    ARG_UNUSED(arg3);
+
+    boot_serial_start(&boot_funcs);
+}
+
+/* Enter the single bootloader update mode: UF2 over mass storage and
+ * SMP serial recovery are both active until an update arrives. */
+static void boot_update_enter(void)
+{
+    int rc;
+
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+    io_led_set(1);
+#endif
+
+    mcuboot_status_change(MCUBOOT_STATUS_SERIAL_DFU_ENTERED);
+
+    BOOT_LOG_INF("Entering bootloader update mode (UF2 and serial recovery)");
+
+    rc = uf2_disk_register();
+    if (rc != 0) {
+        BOOT_LOG_ERR("Failed to register UF2 disk: %d", rc);
+        FIH_PANIC;
+    }
+
+    /* Brings up USB (for the mass storage drive and/or the CDC ACM
+     * serial port) with all enabled update transport classes on it. */
+    rc = boot_usb_enable();
+    if (rc != 0) {
+        BOOT_LOG_ERR("Failed to init USB: %d", rc);
+        FIH_PANIC;
+    }
+
+    rc = boot_console_init();
+    if (rc != 0) {
+        BOOT_LOG_ERR("Error initializing boot console. rc = %d", rc);
+        FIH_PANIC;
+    }
+
+    (void)k_thread_create(&boot_serial_thread_data, boot_serial_thread_stack,
+                          K_THREAD_STACK_SIZEOF(boot_serial_thread_stack),
+                          boot_serial_thread_fn, NULL, NULL, NULL,
+                          K_PRIO_PREEMPT(CONFIG_MAIN_THREAD_PRIORITY + 1),
+                          0, K_NO_WAIT);
+    (void)k_thread_name_set(&boot_serial_thread_data, "boot_serial");
+
+    BOOT_LOG_INF("UF2 drive and serial recovery active, waiting for firmware...");
+
+    /* Poll until all UF2 blocks have been received; the serial thread
+     * services SMP commands at the same time. */
+    while (!uf2_disk_is_complete()) {
+        MCUBOOT_WATCHDOG_FEED();
+        k_sleep(K_MSEC(10));
+    }
+
+    BOOT_LOG_INF("UF2 transfer complete");
+
+    uf2_disk_close();
+
+#ifndef CONFIG_SINGLE_APPLICATION_SLOT
+    /* Dual slot: mark secondary image as pending for swap */
+    rc = boot_set_pending(0);
+    if (rc != 0) {
+        BOOT_LOG_ERR("Failed to set pending flag: %d", rc);
+    }
+#endif
+
+    /* Reboot to apply the new image */
+    sys_reboot(SYS_REBOOT_COLD);
+}
+
+#endif /* MCUBOOT_UPDATE_MODE_COMBINED && MCUBOOT_UPDATE_MODE_ENTERED */
+
 #if defined(CONFIG_MCUBOOT_UF2_ENTRANCE_GPIO) || \
     defined(CONFIG_MCUBOOT_UF2_ENTRANCE_BOOT_MODE) || \
+    defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP) || \
     defined(CONFIG_MCUBOOT_UF2_NO_APPLICATION)
 static void boot_uf2_enter(void)
 {
+#ifdef MCUBOOT_UPDATE_MODE_COMBINED
+    /* Serial recovery is enabled too: both transports run in one mode. */
+    boot_update_enter();
+#else
     int rc;
 
 #ifdef CONFIG_MCUBOOT_INDICATION_LED
@@ -193,7 +303,7 @@ static void boot_uf2_enter(void)
         return;
     }
 
-    rc = uf2_usb_init();
+    rc = boot_usb_enable();
     if (rc != 0) {
         BOOT_LOG_ERR("Failed to init USB: %d", rc);
         uf2_disk_close();
@@ -222,6 +332,7 @@ static void boot_uf2_enter(void)
 
     /* Reboot to apply the new image */
     sys_reboot(SYS_REBOOT_COLD);
+#endif /* MCUBOOT_UPDATE_MODE_COMBINED */
 }
 #endif
 
@@ -234,6 +345,10 @@ static void boot_uf2_enter(void)
  */
 static void boot_serial_enter(int inactivity_in_ms)
 {
+#ifdef MCUBOOT_UPDATE_MODE_COMBINED
+    /* UF2 is enabled too: both transports run in one mode. */
+    boot_update_enter();
+#else
     int rc;
 
 #ifdef CONFIG_MCUBOOT_INDICATION_LED
@@ -274,6 +389,7 @@ static void boot_serial_enter(int inactivity_in_ms)
     boot_serial_start(&boot_funcs);
     BOOT_LOG_DBG("Bootloader serial process was terminated unexpectedly");
     FIH_PANIC;
+#endif /* MCUBOOT_UPDATE_MODE_COMBINED */
 }
 #endif
 

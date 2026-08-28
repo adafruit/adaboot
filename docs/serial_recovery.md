@@ -93,6 +93,12 @@ Refer to the respective documentation and source code for more details.
 Entering the serial recovery mode is usually possible right after a device reset, for instance as a reaction on a GPIO pin state.
 Refer to the given mcuboot-port details to get information on how to enter the serial recovery mode.
 
+In the Zephyr port, when UF2 (``CONFIG_MCUBOOT_UF2``) is enabled as well,
+serial recovery is not a separate mode: any entrance method enters the
+single bootloader update mode in which both SMP serial recovery and the
+UF2 mass storage drive are active at the same time (see
+[UF2 Drag-and-Drop Update](uf2.md)).
+
 ## Serial recovery mode usage
 
 ### MCU Manager CLI installation
