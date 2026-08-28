@@ -56,6 +56,11 @@ config BOOT_SERIAL_CDC_ACM_VID
 	  USB Vendor ID presented during serial recovery mode.
 		You must use your own VID for samples and applications outside of Zephyr Project.
 
+	  Note: when UF2 (CONFIG_MCUBOOT_UF2) is enabled as well, the bootloader
+	  runs a single combined update mode on one USB device, which presents
+	  itself with the UF2 identity (CONFIG_MCUBOOT_UF2_USB_VID/PID); these
+	  serial recovery VID/PID options are then unused.
+
 config BOOT_SERIAL_CDC_ACM_PID
 	hex "USB Product ID for CDC ACM serial recovery"
 	default 0x0004
@@ -258,11 +263,17 @@ config BOOT_SERIAL_DETECT_DELAY
 
 menuconfig BOOT_SERIAL_WAIT_FOR_DFU
 	bool "Wait a prescribed duration to see if DFU is invoked by receiving a MCUmgr comand"
-	depends on BOOT_SERIAL_UART || BOOT_SERIAL_CDC_ACM
+	depends on (BOOT_SERIAL_UART || BOOT_SERIAL_CDC_ACM) && \
+		   (!MCUBOOT_UF2 || !BOOT_SERIAL_CDC_ACM)
 	help
 	  If y, MCUboot waits for a prescribed duration of time to allow
 	  for DFU to be invoked. The serial recovery can be entered by receiving any
 	  mcumgr command.
+
+	  This is not available when the combined UF2 + CDC ACM serial update
+	  mode is active: that mode initializes the console (and USB) eagerly
+	  when entering the bootloader update mode, not lazily while waiting
+	  for a DFU command.
 
 config BOOT_SERIAL_WAIT_FOR_DFU_TIMEOUT
 	int "Duration to wait for the serial DFU timeout in ms"
@@ -334,5 +345,16 @@ config BOOT_SERIAL_IMG_GRP_SLOT_INFO
 	help
 	  If y, will include the slot info command which lists what available
 	  slots there are in the system.
+
+config BOOT_SERIAL_UPDATE_THREAD_STACK_SIZE
+	int "Serial recovery thread stack size in combined UF2 + serial mode"
+	depends on MCUBOOT_UF2
+	default 2048
+	help
+	  When both serial recovery and UF2 (CONFIG_MCUBOOT_UF2) are enabled,
+	  there is a single bootloader update mode in which SMP serial recovery
+	  is serviced from a dedicated thread while the main thread polls the
+	  UF2 mass storage drive. This is the stack size of that serial recovery
+	  thread.
 
 endif # MCUBOOT_SERIAL

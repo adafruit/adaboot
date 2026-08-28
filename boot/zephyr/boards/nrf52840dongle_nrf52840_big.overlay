@@ -16,17 +16,17 @@
 
 		boot_partition: partition@1000 {
 			label = "mcuboot";
-			reg = <0x00001000 0x00010000>;
+			reg = <0x00001000 0x00014000>;
 		};
 
-		slot0_partition: partition@11000 {
+		slot0_partition: partition@15000 {
 			label = "image-0";
-			reg = <0x00011000 0x00065000>;
+			reg = <0x00015000 0x00065000>;
 		};
 
-		slot1_partition: partition@76000 {
+		slot1_partition: partition@7a000 {
 			label = "image-1";
-			reg = <0x00076000 0x00065000>;
+			reg = <0x0007a000 0x00065000>;
 		};
 	};
 };

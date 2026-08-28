@@ -75,6 +75,16 @@ tests:
       - DTC_OVERLAY_FILE="./boards/nrf52840dongle_nrf52840_big.overlay;./usb_cdc_acm.overlay;app.overlay"
     extra_configs:
       - CONFIG_DEPRECATION_TEST=y
+  sample.bootloader.mcuboot.uf2_serial_recovery:
+    tags: bootloader_mcuboot
+    platform_allow: nrf52840dk/nrf52840
+    integration_platforms:
+      - nrf52840dk/nrf52840
+    extra_args:
+      - EXTRA_CONF_FILE=./uf2_serial_recovery.conf
+      - DTC_OVERLAY_FILE="./boards/nrf52840_big.overlay;./usb_cdc_acm.overlay;app.overlay"
+    extra_configs:
+      - CONFIG_MAIN_THREAD_PRIORITY=0
   sample.bootloader.mcuboot.usb_cdc_acm_recovery_log:
     tags: bootloader_mcuboot
     platform_allow: nrf52840dk/nrf52840

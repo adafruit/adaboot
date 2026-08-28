@@ -35,9 +35,24 @@
 	};
 };
 
+/* CDC ACM serial recovery port on the native USB device controller
+ * (zephyr_udc0 = &usbhs, enabled in the upstream board DTS). The
+ * bootloader's combined update mode exposes this serial port and the UF2
+ * mass storage drive simultaneously on one USB device. */
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
+
 / {
 	chosen {
 		zephyr,boot-mode = &boot_mode0;
+		/* Route serial recovery (SMP/mcumgr) to the CDC ACM port on the
+		 * native USB controller instead of the uart20 console, so the
+		 * VCOM UART stays the log console and the bootloader's combined
+		 * update mode serves mcumgr over USB (alongside the UF2 drive). */
+		zephyr,uart-mcumgr = &cdc_acm_uart0;
 	};
 };
 

@@ -32,19 +32,21 @@ int uf2_disk_register(void);
 bool uf2_disk_is_complete(void);
 
 /**
+ * @brief Check if the UF2 virtual disk is currently registered.
+ *
+ * The USB mass storage setup requires the disk to be registered before
+ * the USB device is initialized, so this lets the USB layer verify the
+ * registration order.
+ *
+ * @return true if uf2_disk_register() succeeded and the disk has not
+ *         been closed since
+ */
+bool uf2_disk_is_registered(void);
+
+/**
  * @brief Close the flash area and unregister the disk.
  */
 void uf2_disk_close(void);
-
-/**
- * @brief Initialize USB next-gen stack with MSC for UF2.
- *
- * Creates the USB device context, adds descriptors and MSC class,
- * and enables the USB device. Must be called after uf2_disk_register().
- *
- * @return 0 on success, negative errno on failure
- */
-int uf2_usb_init(void);
 
 #ifdef __cplusplus
 }
