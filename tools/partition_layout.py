@@ -1032,6 +1032,49 @@ def gen_kconfig_sysbuild():
     print(f"  Wrote {KCONFIG_SYSBUILD.relative_to(MODULE_DIR.parent)} ({modes_desc})")
 
 
+BEGIN_MARKER = "/* BEGIN generated partitions -- regenerate with tools/partition_layout.py --fix */"
+END_MARKER = "/* END generated partitions */"
+
+
+def write_partitions_dtsi(dtsi_path, content):
+    """Write the generated partitions into a dtsi without losing what is not.
+
+    The rest of the file is hand-maintained: enabling the external flash, the
+    retention cell the bootloader double-tap needs, chosen nodes and aliases.
+    Only the region between the markers belongs to the planner, so only that
+    region is replaced.
+
+    Every shape this cannot handle unambiguously is refused rather than
+    guessed at, because the failure mode of guessing is deleting a board's
+    boot-mode configuration and reporting success. That covers a file with no
+    markers, with the end marker before the start, with more than one block,
+    and generated content that would itself contain a marker.
+    """
+    if BEGIN_MARKER in content or END_MARKER in content:
+        return False, "generated content contains a marker; refusing to write"
+    block = f"{BEGIN_MARKER}\n{content.rstrip()}\n{END_MARKER}\n"
+    if not dtsi_path.is_file():
+        dtsi_path.parent.mkdir(parents=True, exist_ok=True)
+        dtsi_path.write_text(block)
+        return True, f"Wrote {dtsi_path.relative_to(MODULE_DIR.parent)}"
+    existing = dtsi_path.read_text()
+    rel = dtsi_path.relative_to(MODULE_DIR.parent)
+    if existing.count(BEGIN_MARKER) > 1 or existing.count(END_MARKER) > 1:
+        return False, f"{rel} has more than one generated block; fix it by hand first"
+    begin = existing.find(BEGIN_MARKER)
+    end = existing.find(END_MARKER, begin + len(BEGIN_MARKER)) if begin >= 0 else -1
+    if begin < 0 or end < 0:
+        return False, (
+            f"{rel} has no complete generated block, so regenerating it would "
+            f"overwrite whatever else the file holds. Wrap the partition nodes in\n"
+            f"    {BEGIN_MARKER}\n    ...\n    {END_MARKER}\n"
+            f"once, and --fix will keep to that region from then on."
+        )
+    tail = existing[end + len(END_MARKER):]
+    dtsi_path.write_text(existing[:begin] + block + tail.lstrip("\n"))
+    return True, f"Updated the generated block in {rel}"
+
+
 def fix_alignment(board_key, vendor, edt, flash_overrides=None):
     """Plan and write the partition portion to
     dts/<vendor>/<board_key>.dtsi.
@@ -1044,7 +1087,7 @@ def fix_alignment(board_key, vendor, edt, flash_overrides=None):
     """
     if not vendor:
         print(f"  No vendor declared for {board_key} in boards.toml; cannot place dtsi.", file=sys.stderr)
-        return
+        return False
     dtsi_dir = DTS_OUT_DIR / vendor
     dtsi_path = dtsi_dir / f"{board_key}.dtsi"
 
@@ -1064,16 +1107,14 @@ def fix_alignment(board_key, vendor, edt, flash_overrides=None):
             f" ({format_size(slot0_size)}) [also: {', '.join(split['slot0'][1])}]"
         )
         print()
-        content = generate_mapped_split_dtsi(split)
-        dtsi_dir.mkdir(parents=True, exist_ok=True)
-        dtsi_path.write_text(content)
-        print(f"  Wrote {dtsi_path.relative_to(MODULE_DIR.parent)}")
-        return
+        ok, message = write_partitions_dtsi(dtsi_path, generate_mapped_split_dtsi(split))
+        print(f"  {message}", file=sys.stdout if ok else sys.stderr)
+        return ok
 
     planned = plan_partitions(edt, flash_overrides)
     if not planned:
         print("  No flash devices found to plan partitions for.")
-        return
+        return False
 
     # Show the planned layout
     for dev_label, total_size, erase_size, parts, *rest in planned:
@@ -1095,11 +1136,9 @@ def fix_alignment(board_key, vendor, edt, flash_overrides=None):
             )
         print()
 
-    content = generate_partitions_dtsi(planned)
-
-    dtsi_dir.mkdir(parents=True, exist_ok=True)
-    dtsi_path.write_text(content)
-    print(f"  Wrote {dtsi_path.relative_to(MODULE_DIR.parent)}")
+    ok, message = write_partitions_dtsi(dtsi_path, generate_partitions_dtsi(planned))
+    print(f"  {message}", file=sys.stdout if ok else sys.stderr)
+    return ok
 
 
 # ── Main ─────────────────────────────────────────────────────────────────
@@ -1173,7 +1212,7 @@ def main():
     print()
 
     if args.fix:
-        fix_alignment(args.board, vendor, edt, flash_overrides)
+        sys.exit(0 if fix_alignment(args.board, vendor, edt, flash_overrides) else 1)
     else:
         split = plan_code_partition_split(edt, flash_overrides)
         if split is not None:
