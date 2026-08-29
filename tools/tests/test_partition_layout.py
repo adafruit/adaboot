@@ -25,6 +25,7 @@ from partition_layout import (
     render_detail_lines,
     generate_partitions_dtsi,
     plan_partitions,
+    check_layout,
     _has_predefined_mcuboot,
     discover_all_flash,
     get_erase_size,
@@ -818,3 +819,167 @@ class TestPredefinedMcuboot:
         # The filesystem offset should differ (nvm now takes a page before it)
         fs = [p for p in parts if p[0] == "filesystem"][0]
         assert fs[2] != 0x118000  # not the old overlay offset
+
+# ── Helpers to build resolved (post-overlay) partitions ──────────────────
+
+
+def _reg(addr, size):
+    return SimpleNamespace(addr=addr, size=size)
+
+
+def _mapped_flash(label, base, size, erase=4096):
+    """A memory-mapped NVM device node, as it appears in a resolved edt."""
+    return SimpleNamespace(
+        name=label,
+        labels=[label],
+        props={"reg": _prop([base, size]), "erase-block-size": _prop(erase)},
+        compats=["soc-nv-flash"],
+        children={},
+        regs=[_reg(base, size)],
+        parent=None,
+        filename="",
+    )
+
+
+def _fixed_flash(label, base, size, partitions):
+    """A device whose partitions use the older fixed-partitions binding.
+
+    Returns ``(device, partition_nodes)``; the nodes are separate edt entries
+    the way edtlib exposes them.
+    """
+    device = _mapped_flash(label, base, size)
+    grouping = SimpleNamespace(
+        name="partitions", labels=[], props={}, compats=["fixed-partitions"], parent=device
+    )
+    nodes = []
+    for node_label, offset, psize in partitions:
+        nodes.append(
+            SimpleNamespace(
+                name=f"partition@{offset:x}",
+                labels=[node_label],
+                props={"reg": _prop([offset, psize])},
+                compats=[],
+                children={},
+                regs=[_reg(offset, psize)],
+                parent=grouping,
+            )
+        )
+    return device, nodes
+
+
+def _mapped_partition(node_label, offset, size, resolved_addr, device):
+    """A zephyr,mapped-partition child of ``device``.
+
+    ``resolved_addr`` is what devicetree resolved the partition to, which is
+    ``device base + offset`` only while address translation is intact.
+    """
+    grouping = SimpleNamespace(name="partitions", labels=[], props={}, parent=device)
+    return SimpleNamespace(
+        name=f"partition@{offset:x}",
+        labels=[node_label],
+        props={"reg": _prop([offset, size])},
+        compats=["zephyr,mapped-partition"],
+        children={},
+        regs=[_reg(resolved_addr, size)],
+        parent=grouping,
+    )
+
+
+# ── Unit tests: check_layout ─────────────────────────────────────────────
+
+
+class TestCheckLayoutTranslation:
+    """A rebuilt partitions node that drops ranges; resolves to bare offsets."""
+
+    def test_translated_addresses_pass(self):
+        flash = _mapped_flash("flash0", 0x10000000, 2 * MB)
+        edt = _make_edt(
+            flash,
+            _mapped_partition("code_partition", 0x100, 0x17FF00, 0x10000100, flash),
+            _mapped_partition("nvm_partition", 0x180000, 0x800, 0x10180000, flash),
+        )
+        assert check_layout(edt) == []
+
+    def test_untranslated_addresses_fail(self):
+        flash = _mapped_flash("flash0", 0x10000000, 2 * MB)
+        edt = _make_edt(
+            flash,
+            _mapped_partition("code_partition", 0x100, 0x17FF00, 0x100, flash),
+        )
+        problems = check_layout(edt)
+        assert len(problems) == 1
+        assert "code_partition" in problems[0]
+        assert "outside flash0" in problems[0]
+        assert "ranges" in problems[0]
+
+    def test_absolute_addresses_without_ranges_pass(self):
+        """Some overlays write absolute addresses and omit ranges; that resolves
+        to the same correct address, so it must not be reported."""
+        flash = _mapped_flash("flash0", 0x10000000, 2 * MB)
+        edt = _make_edt(
+            flash,
+            _mapped_partition("code_partition", 0x10000100, 0x1000, 0x10000100, flash),
+        )
+        assert check_layout(edt) == []
+
+    def test_zero_based_device_is_unaffected(self):
+        """On a device based at 0 the translated and bare values coincide."""
+        flash = _mapped_flash("rram0", 0x0, 1 * MB)
+        edt = _make_edt(
+            flash,
+            _mapped_partition("slot0_partition", 0x10000, 0x1000, 0x10000, flash),
+        )
+        assert check_layout(edt) == []
+
+    def test_fixed_partitions_have_no_address_checked(self):
+        """fixed-partitions are addressed by offset, so they carry no mapping."""
+        flash, parts = _fixed_flash("flash0", 0x0, 4 * MB, [("storage_partition", 0x0, 0x8000)])
+        assert check_layout(_make_edt(flash, *parts)) == []
+
+
+class TestCheckLayoutCoversFixedPartitions:
+    """Geometry must be checked on fixed-partitions too.
+
+    Most layouts this fork emits use that binding, so checking only mapped
+    partitions would report those boards as ok without inspecting anything.
+    """
+
+    def test_overlap_on_fixed_partitions_is_reported(self):
+        flash, parts = _fixed_flash(
+            "flash0",
+            0x0,
+            1 * MB,
+            [("boot_partition", 0x0, 0x20000), ("slot0_partition", 0x10000, 0x10000)],
+        )
+        problems = check_layout(_make_edt(flash, *parts))
+        assert any("overlaps" in p for p in problems)
+
+    def test_past_end_on_fixed_partitions_is_reported(self):
+        flash, parts = _fixed_flash(
+            "flash0", 0x0, 0x20000, [("slot0_partition", 0x10000, 0x20000)]
+        )
+        problems = check_layout(_make_edt(flash, *parts))
+        assert any("past the end" in p for p in problems)
+
+
+class TestCheckLayoutGeometry:
+    def test_overlap_is_reported(self):
+        flash = _mapped_flash("flash0", 0x0, 1 * MB)
+        edt = _make_edt(
+            flash,
+            _mapped_partition("boot_partition", 0x0, 0x20000, 0x0, flash),
+            _mapped_partition("slot0_partition", 0x10000, 0x10000, 0x10000, flash),
+        )
+        problems = check_layout(edt)
+        assert any("overlaps" in p for p in problems)
+
+    def test_past_end_of_device_is_reported(self):
+        flash = _mapped_flash("flash0", 0x0, 0x20000)
+        edt = _make_edt(
+            flash,
+            _mapped_partition("slot0_partition", 0x10000, 0x20000, 0x10000, flash),
+        )
+        problems = check_layout(edt)
+        assert any("past the end" in p for p in problems)
+
+
