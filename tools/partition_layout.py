@@ -24,9 +24,11 @@ which maps to a canonical Zephyr board id declared in ``boards.toml``.
 """
 
 import argparse
+import json
 import os
 import pathlib
 import pickle
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -41,7 +43,26 @@ MANIFEST_PATH = MODULE_DIR / "boards.toml"
 DTS_OUT_DIR = MODULE_DIR.parent / "dts"
 MCUBOOT_BOARDS_CMAKE = DTS_OUT_DIR / "mcuboot_boards.cmake"
 KCONFIG_SYSBUILD = DTS_OUT_DIR / "Kconfig.sysbuild"
+LOCK_PATH = DTS_OUT_DIR / "layouts.lock.json"
+DOCS_PATH = DTS_OUT_DIR / "LAYOUTS.md"
 DEFAULT_MCUBOOT_MODE = "single_app"
+
+
+def _is_zephyr_tree(path):
+    """True if ``path`` looks like a Zephyr source tree rather than a module dir."""
+    return (path / "Kconfig.zephyr").is_file()
+
+
+def _west_topdir():
+    try:
+        r = subprocess.run(
+            ["west", "topdir"], capture_output=True, text=True, cwd=MODULE_DIR
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return pathlib.Path(r.stdout.strip())
+    except Exception:
+        pass
+    return None
 
 
 def _find_zephyr_base():
@@ -49,6 +70,7 @@ def _find_zephyr_base():
     env = os.environ.get("ZEPHYR_BASE")
     if env:
         return pathlib.Path(env)
+    top = None
     try:
         r = subprocess.run(
             ["west", "config", "zephyr.base"],
@@ -59,14 +81,25 @@ def _find_zephyr_base():
         if r.returncode == 0 and r.stdout.strip():
             base = pathlib.Path(r.stdout.strip())
             if not base.is_absolute():
-                top = subprocess.run(
-                    ["west", "topdir"], capture_output=True, text=True, cwd=MODULE_DIR
-                )
-                if top.returncode == 0 and top.stdout.strip():
-                    base = pathlib.Path(top.stdout.strip()) / base
+                top = _west_topdir()
+                if top is not None:
+                    base = top / base
             return base.resolve()
     except Exception:
         pass
+    # `make workspace` does not set zephyr.base, and this repo has its own
+    # zephyr/ directory holding the Zephyr *module* metadata -- which is not a
+    # Zephyr tree. Look where the manifest actually puts it (path-prefix
+    # "deps") before falling back, so the tool works right after `make
+    # workspace` without ZEPHYR_BASE being exported by hand.
+    if top is None:
+        top = _west_topdir()
+    for candidate in (
+        (top / "deps" / "zephyr") if top is not None else None,
+        MODULE_DIR.parent / "deps" / "zephyr",
+    ):
+        if candidate is not None and _is_zephyr_tree(candidate):
+            return candidate.resolve()
     # Fallback (only used for unit tests that build fake paths from this value).
     return (MODULE_DIR.parent / "zephyr").resolve()
 
@@ -135,7 +168,7 @@ def discover_boards():
 # ── Devicetree build + load ───────────────────────────────────────────────
 
 
-def cmake_only_build(board_id, build_dir):
+def cmake_only_build(board_id, build_dir, overlays=(), fatal=True):
     """Run west build --cmake-only to generate the resolved devicetree.
 
     The build only needs the resolved devicetree (``edt.pickle``), so it is run
@@ -144,7 +177,22 @@ def cmake_only_build(board_id, build_dir):
     would require this module to be wired up as a west module and would couple
     layout planning to the bootloader build. The board's own DTS (which is
     where the flash geometry lives) is what produces the edt, not the app.
+
+    Without ``overlays`` the edt describes the board as Zephyr ships it, which
+    is the input the planner needs. Pass overlays (this fork's
+    ``dts/<vendor>/<board>.dtsi``) to instead resolve the layout this fork
+    defines -- the same way ``make build`` applies it via
+    EXTRA_DTC_OVERLAY_FILE. That is what ``--check`` inspects, so the tool
+    validates the file it emits rather than only the board it planned from.
+
+    With ``fatal`` false a failed build is returned as an error string instead
+    of exiting, so a sweep over every board can report it and carry on.
     """
+    # Start from an empty directory. Reusing one caches the CMake configuration
+    # from whatever overlays it was created with, so a later run silently reads
+    # back the earlier layout instead of the one it asked for.
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
     build_dir.mkdir(parents=True, exist_ok=True)
     sample_dir = ZEPHYR_BASE / "samples" / "hello_world"
     if not sample_dir.is_dir():
@@ -164,10 +212,15 @@ def cmake_only_build(board_id, build_dir):
         "--cmake-only",
         str(sample_dir),
     ]
+    if overlays:
+        cmd += ["--", "-DEXTRA_DTC_OVERLAY_FILE=" + ";".join(str(o) for o in overlays)]
     result = subprocess.run(cmd, cwd=MODULE_DIR, capture_output=True, text=True)
     if result.returncode != 0:
+        if not fatal:
+            return result.stderr
         print(f"Build failed:\n{result.stderr}", file=sys.stderr)
         sys.exit(1)
+    return None
 
 
 def load_edt(build_dir):
@@ -543,19 +596,38 @@ def plan_partitions_predefined(edt, flash_overrides=None):
 # ── Mapped-partition split (shared-flash boards) ───────────────────────────
 
 
-def _partition_device(part_node):
-    """Walk up from a partition node to the NVM memory node that owns it.
+def _looks_like_partition(node):
+    """True if a node is itself a partition rather than an NVM device."""
+    if "zephyr,mapped-partition" in getattr(node, "compats", []):
+        return True
+    parent = getattr(node, "parent", None)
+    return parent is not None and getattr(parent, "name", "") == "partitions"
 
-    The memory node is the first ancestor with a ``reg`` property (the
-    partition's own ``reg`` is an offset+size within it; the ``partitions``
-    grouping node has none).
+
+def _partition_device(part_node):
+    """Walk up to the NVM device owning a partition, with the offset to it.
+
+    Returns ``(device, base_offset)``. The device is the first ancestor with a
+    ``reg`` that is not itself a partition: partitions nest (nRF54H20 puts
+    crypto and ITS regions inside ``secure_storage_partition``, and the Nordic
+    non-secure variants nest ``slot0_s``/``slot0_ns`` inside ``slot0``), and
+    stopping at the first ancestor with a ``reg`` would take a partition for a
+    flash device -- inventing a device with a made-up erase size and leaving
+    the nested offsets relative to the wrong thing. ``base_offset`` is the sum
+    of the enclosing partitions' offsets, so the result is an offset into the
+    real device.
     """
-    p = part_node.parent
-    while p is not None:
-        if p.props.get("reg") is not None:
-            return p
-        p = p.parent
-    return None
+    base_offset = 0
+    node = part_node.parent
+    while node is not None:
+        reg = node.props.get("reg")
+        if reg is not None:
+            if not _looks_like_partition(node):
+                return node, base_offset
+            if len(reg.val) >= 2:
+                base_offset += reg.val[0]
+        node = node.parent
+    return None, 0
 
 
 def _find_code_partition_region(edt):
@@ -1032,6 +1104,435 @@ def gen_kconfig_sysbuild():
     print(f"  Wrote {KCONFIG_SYSBUILD.relative_to(MODULE_DIR.parent)} ({modes_desc})")
 
 
+# ── Checking ─────────────────────────────────────────────────────────────
+
+
+def _is_partition_child(node):
+    """True for any node sitting under a ``partitions`` grouping node.
+
+    Membership is decided by position, not by ``compatible``. A partition
+    carries ``zephyr,mapped-partition`` or sits under a ``fixed-partitions``
+    parent in the common case, but an overlay may add one with no compatible at
+    all -- the node is still a partition, still occupies the space, and is
+    still what the layout means to describe. Keying off the compatible would
+    make those invisible here, which is the opposite of what a layout check is
+    for.
+    """
+    parent = getattr(node, "parent", None)
+    return parent is not None and getattr(parent, "name", "") == "partitions"
+
+
+def iter_layout_partitions(edt):
+    """Yield ``(node, device, offset, size, mapped)`` for every partition.
+
+    ``offset``/``size`` come from the node's own ``reg`` (an offset within the
+    NVM device). ``mapped`` marks ``zephyr,mapped-partition`` nodes, whose
+    ``node.regs[0].addr`` is an address in the SoC's address space that the
+    caller can check. Partitions under the older ``fixed-partitions`` are
+    addressed by offset through the flash API, so they carry no address to
+    verify -- but their geometry is still worth checking, and most layouts this
+    fork emits use that binding.
+    """
+    for node in edt.nodes:
+        mapped = "zephyr,mapped-partition" in getattr(node, "compats", [])
+        if not mapped and not _is_partition_child(node):
+            continue
+        reg = node.props.get("reg")
+        if not reg or len(reg.val) < 2:
+            continue
+        dev, base_offset = _partition_device(node)
+        if dev is None:
+            continue
+        if mapped and (
+            not getattr(node, "regs", None) or not getattr(dev, "regs", None)
+        ):
+            continue
+        yield node, dev, reg.val[0] + base_offset, reg.val[1], mapped
+
+
+def device_base(dev):
+    """Base address of an NVM device, or None when it has none.
+
+    Bus-attached flash (SPI/QSPI/OSPI NOR, NAND) carries a chip select in
+    ``reg`` -- ``mx25lm51245`` is ``reg = <0>``, ``w25n01gv`` is ``reg = <2>``
+    -- and its parent bus has ``#size-cells = <0>``, so edtlib reports an
+    address with no size and nothing is translated. Reading that as a base
+    address would compare partition addresses against a chip select and print
+    a translation complaint that is exactly backwards. A device is only
+    memory-mapped if its register has a size.
+    """
+    regs = getattr(dev, "regs", None)
+    if not regs or regs[0].size is None:
+        return None
+    return regs[0].addr
+
+
+def unplaceable_partitions(edt):
+    """Partitions that declare no usable ``reg``.
+
+    They occupy space and carry a role, but nothing can say where. Skipping
+    them quietly is how a board that has an ``image-1`` gets reported as
+    missing one, so they are surfaced instead.
+    """
+    out = []
+    for node in edt.nodes:
+        if not (
+            "zephyr,mapped-partition" in getattr(node, "compats", [])
+            or _is_partition_child(node)
+        ):
+            continue
+        reg = node.props.get("reg")
+        if not reg or len(reg.val) < 2:
+            out.append(node.labels[0] if node.labels else node.name)
+    return out
+
+
+def check_layout(edt):
+    """Validate a resolved layout, returning a list of problem strings.
+
+    This runs against an edt built with the fork's dtsi applied, so it inspects
+    the layout as the bootloader and application actually see it. It reports:
+
+    * partitions whose resolved address is not ``device base + offset``, which
+      means address translation is broken somewhere between the partition and
+      the NVM device. The usual cause is a ``partitions`` node that was rebuilt
+      by an overlay without re-declaring ``ranges;``: devicetree then treats the
+      child addresses as unmapped rather than as offsets into the device, and
+      the partition silently resolves to a bare offset. Nothing warns, but
+      anything keying off the address (linker offsets, SoC Kconfig that matches
+      a known load address) then sees the wrong value.
+    * partitions that overlap, or extend past the end of their device. This part
+      covers ``fixed-partitions`` too: they carry no address to verify, but most
+      layouts this fork emits use that binding, so restricting the whole check
+      to mapped partitions would leave those boards passing without anything
+      having been looked at.
+
+    Erase-page alignment is deliberately not checked here: it is a property of
+    the plan rather than of the mapping, ``render_detail_lines`` already flags
+    it, and some layouts violate it on purpose (RP2040 puts its code partition
+    at 0x100, right behind the 256-byte second stage bootloader).
+    """
+    problems = [
+        f"{label}: partition has no usable reg, so nothing can place it"
+        for label in unplaceable_partitions(edt)
+    ]
+    by_device = {}
+    for node, dev, offset, size, mapped in iter_layout_partitions(edt):
+        label = node.labels[0] if node.labels else node.name
+        dev_label = dev.labels[0] if dev.labels else dev.name
+        total = get_total_size(dev)
+        if mapped:
+            # Test the resolved address against the device's own window rather
+            # than against base + reg. Both forms are in use: a partition reg is
+            # usually an offset, but an overlay may instead write the absolute
+            # address and leave the partitions node without ranges, which
+            # resolves to the same correct address. What is never right is a
+            # partition resolving outside the device it lives in -- exactly what
+            # a rebuilt partitions node missing ranges; produces, since the
+            # offset is then left untranslated.
+            base = device_base(dev)
+            actual = node.regs[0].addr
+            if base is None:
+                by_device.setdefault(dev_label, (dev, total, []))[2].append(
+                    (label, offset, size)
+                )
+                continue
+            if total and not (base <= actual < base + total):
+                problems.append(
+                    f"{label}: resolves to 0x{actual:x}, outside {dev_label} "
+                    f"(0x{base:x}-0x{base + total:x}) -- address translation is "
+                    f"broken; does the partitions node declare ranges;?"
+                )
+            # Geometry below is compared in offsets from the device base, so a
+            # partition declared either way lands in the same space. When the
+            # translation is broken the difference is meaningless (and often
+            # negative), so keep the declared offset instead of publishing an
+            # address like 0x-10000000.
+            translated = actual - base
+            if translated >= 0 and (not total or translated < total):
+                offset = translated
+        by_device.setdefault(dev_label, (dev, total, []))[2].append((label, offset, size))
+
+    for dev_label, (dev, total, parts) in sorted(by_device.items()):
+        ordered = sorted(parts, key=lambda p: p[1])
+        for label, offset, size in ordered:
+            if total and offset + size > total:
+                problems.append(
+                    f"{label}: ends at 0x{offset + size:x}, past the end of "
+                    f"{dev_label} (0x{total:x})"
+                )
+        # Compare against a running high-water mark rather than the neighbour:
+        # a partition spanning several later ones only ever overlaps its
+        # immediate successor in a pairwise walk.
+        high_label, high_end = None, 0
+        for label, offset, size in ordered:
+            if offset < high_end:
+                problems.append(
+                    f"{high_label} (ends 0x{high_end:x}) overlaps "
+                    f"{label} (starts 0x{offset:x}) on {dev_label}"
+                )
+            if offset + size > high_end:
+                high_label, high_end = label, offset + size
+    return problems
+
+
+def resolved_layout(edt, erase_overrides=None):
+    """Describe a resolved layout as ``[(dev_label, total, erase, parts)]``.
+
+    ``parts`` is ``(label, node_label, offset, size)`` -- the shape the
+    rendering helpers take -- with offsets normalised to the device base, so a
+    partition written as an offset and one written as an absolute address are
+    described identically. This is the common ground the check, the lock file
+    and the generated docs all work from.
+    """
+    erase_overrides = erase_overrides or {}
+    devices = {}
+    for node, dev, offset, size, mapped in iter_layout_partitions(edt):
+        dev_label = dev.labels[0] if dev.labels else dev.name
+        node_label = node.labels[0] if node.labels else node.name
+        label_prop = node.props.get("label")
+        label = label_prop.val if label_prop else node_label
+        if mapped:
+            offset = node.regs[0].addr - dev.regs[0].addr
+        if dev_label not in devices:
+            erase = erase_overrides.get(dev_label) or get_erase_size(dev)
+            devices[dev_label] = (get_total_size(dev), erase, [])
+        devices[dev_label][2].append((label, node_label, offset, size))
+    return [
+        (dev_label, total, erase, sorted(parts, key=lambda p: p[2]))
+        for dev_label, (total, erase, parts) in sorted(devices.items())
+    ]
+
+
+def layout_fingerprint(devices):
+    """Reduce a resolved layout to the JSON the lock file stores."""
+    return {
+        dev_label: {
+            "size": total,
+            "partitions": [
+                {"node": node_label, "label": label, "offset": offset, "size": size}
+                # keyed on the role label below, which survives a DTS adding or
+                # reordering node labels the way node labels do not
+                for label, node_label, offset, size in parts
+            ],
+        }
+        for dev_label, total, _erase, parts in devices
+    }
+
+
+def compare_fingerprint(locked, current):
+    """Diff a locked layout against the current one.
+
+    Returns ``(breaking, additions)``. A partition that moved, shrank, grew or
+    disappeared is breaking: a device already in the field has its filesystem
+    (or its settings, or its bonding keys) at the locked address, and shifting
+    that is what silently destroys someone's CIRCUITPY drive on the next
+    update. A partition appearing in free space takes nothing away from the
+    existing ones, so it is reported without failing.
+    """
+    breaking = []
+    additions = []
+    for dev_label, locked_dev in sorted(locked.items()):
+        current_dev = current.get(dev_label)
+        if current_dev is None:
+            breaking.append(f"{dev_label}: device is gone from the layout")
+            continue
+        if locked_dev.get("size") and current_dev.get("size") != locked_dev["size"]:
+            breaking.append(
+                f"{dev_label}: device size changed from "
+                f"{format_size(locked_dev['size'])} to {format_size(current_dev['size'])}"
+            )
+        def key(part):
+            return part.get("label") or part["node"]
+
+        locked_parts = {key(p): p for p in locked_dev.get("partitions", [])}
+        current_parts = {key(p): p for p in current_dev.get("partitions", [])}
+        for node_label, locked_part in sorted(locked_parts.items()):
+            current_part = current_parts.get(node_label)
+            if current_part is None:
+                breaking.append(f"{dev_label}/{node_label}: partition removed")
+                continue
+            if current_part["offset"] != locked_part["offset"]:
+                breaking.append(
+                    f"{dev_label}/{node_label}: moved from 0x{locked_part['offset']:x} "
+                    f"to 0x{current_part['offset']:x}"
+                )
+            if current_part["size"] != locked_part["size"]:
+                breaking.append(
+                    f"{dev_label}/{node_label}: resized from "
+                    f"{format_size(locked_part['size'])} to {format_size(current_part['size'])}"
+                )
+        for node_label in sorted(set(current_parts) - set(locked_parts)):
+            part = current_parts[node_label]
+            additions.append(
+                f"{dev_label}/{node_label}: new partition at 0x{part['offset']:x} "
+                f"({format_size(part['size'])})"
+            )
+    for dev_label in sorted(set(current) - set(locked)):
+        additions.append(f"{dev_label}: new device in the layout")
+    return breaking, additions
+
+
+def load_lock():
+    """Read the layout lock, or ``None`` when the layout has not been locked."""
+    if not LOCK_PATH.is_file():
+        return None
+    try:
+        with open(LOCK_PATH) as f:
+            boards = json.load(f).get("boards")
+    except (json.JSONDecodeError, AttributeError, OSError) as err:
+        print(f"{LOCK_PATH.name} is unreadable ({err}); refusing to skip the "
+              "lock check silently.", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(boards, dict):
+        print(f"{LOCK_PATH.name} has no usable 'boards' object.", file=sys.stderr)
+        sys.exit(1)
+    return boards
+
+
+def write_lock(boards):
+    """Write the layout lock, sorted so diffs stay readable."""
+    payload = {
+        "_comment": (
+            "Locked flash layouts. Applications place their filesystem and "
+            "settings at these addresses, so moving or shrinking a partition "
+            "breaks devices already in the field. partition_layout.py --check "
+            "fails on any such change; re-run --lock to accept one deliberately."
+        ),
+        "boards": boards,
+    }
+    LOCK_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def render_board_markdown(board_key, board_id, devices):
+    """Render one board's flash map as markdown, reusing the ASCII renderer."""
+    lines = [f"## {board_key}", "", f"Zephyr board target: `{board_id}`", ""]
+    for dev_label, total, erase, parts in devices:
+        lines.append(f"### {dev_label} -- {format_size(total)}, {format_size(erase)} erase page")
+        lines.append("")
+        lines.append("```")
+        lines.append(render_bar(parts, total))
+        lines.extend(render_detail_lines(parts, total, erase))
+        lines.append("```")
+        lines.append("")
+    return lines
+
+
+def check_roles(devices, mcuboot=True):
+    """Check that the layout provides the roles the standard scheme promises.
+
+    A layout can resolve perfectly and still not do its job: if the overlay's
+    partitions never made it into the devicetree, the board simply has no
+    filesystem, and nothing says so. The point of this fork is that every board
+    ends up with the same roles so an application can count on them, which
+    makes a missing one a defect rather than a variation.
+
+    ``image-1`` is deliberately not required -- a single-slot board is a valid
+    configuration, and 4 of the boards here are built that way.
+    """
+    have = {label for _dev, _t, _e, parts in devices for label, *_ in parts}
+    required = ["storage", "nvm", "filesystem"]
+    required += ["mcuboot", "image-0"] if mcuboot else ["code-partition"]
+    consequence = {
+        "filesystem": "the board gets no CIRCUITPY drive",
+        "nvm": "nothing backs the raw nvm API",
+        "storage": "Zephyr has nowhere to keep settings, including BLE bonding keys",
+    }
+    problems = []
+    for role in required:
+        if role in have:
+            continue
+        why = consequence.get(role)
+        problems.append(
+            f"no {role!r} partition in the resolved layout"
+            + (f" -- {why}" if why else "")
+        )
+    return problems
+
+
+def partition_map(edt):
+    """Map ``(device, node_label)`` to ``(offset, size)`` for every partition."""
+    out = {}
+    for node, dev, offset, size, mapped in iter_layout_partitions(edt):
+        node_label = node.labels[0] if node.labels else node.name
+        dev_label = dev.labels[0] if dev.labels else dev.name
+        if mapped:
+            offset = node.regs[0].addr - dev.regs[0].addr
+        out[(dev_label, node_label)] = (offset, size)
+    return out
+
+
+def audit_dropped(baseline, resolved):
+    """List regions the board's own DTS reserves that the layout no longer does.
+
+    This answers "did we forget a partition?" -- the question that is otherwise
+    only answerable by knowing every platform's quirks by heart. A board DTS
+    reserves space for things the layout planner knows nothing about: radio
+    coprocessor images, wifi firmware blobs, secure-storage and configuration
+    regions a ROM or a secure element expects to find. Rebuilding the
+    partitions node drops all of them, and nothing complains, because nothing
+    downstream references them by label.
+
+    Returns ``(unallocated, replaced)``. ``unallocated`` is the sharper signal:
+    upstream reserved the region and now nothing claims it at all. ``replaced``
+    means something else now sits there, which is expected for the app and boot
+    slots this fork deliberately re-plans and worth a look for anything else.
+    Both are for a human to judge, so neither is treated as a failure.
+    """
+    unallocated = []
+    replaced = []
+    for (dev_label, node_label), (offset, size) in sorted(baseline.items()):
+        if (dev_label, node_label) in resolved:
+            continue
+        covering = sorted(
+            label
+            for (dev, label), (o, s) in resolved.items()
+            if dev == dev_label and o < offset + size and offset < o + s
+        )
+        entry = (dev_label, node_label, offset, size, covering)
+        (replaced if covering else unallocated).append(entry)
+    return unallocated, replaced
+
+
+def baseline_layout(board_key, board_id):
+    """Resolve a board as Zephyr ships it, with none of this fork's overlays."""
+    build_dir = MODULE_DIR / f"build-baseline-{board_key}"
+    err = cmake_only_build(board_id, build_dir, overlays=(), fatal=False)
+    if err is not None:
+        return None
+    return partition_map(load_edt(build_dir))
+
+
+def resolve_board(board_key, vendor, board_id, mcuboot=True, erase_overrides=None):
+    """Resolve a board's layout once, for whoever needs it.
+
+    Returns ``(devices, edt, error)``: the resolved layout in the shape
+    ``resolved_layout`` produces plus the devicetree it came from, or an error
+    string when the board's dtsi is missing or does not resolve. ``--check``,
+    ``--lock`` and ``--gen-docs`` all go through here so a sweep builds each
+    board a single time.
+    """
+    if not vendor:
+        return None, None, f"no vendor declared for {board_key} in boards.toml"
+    dtsi_path = DTS_OUT_DIR / vendor / f"{board_key}.dtsi"
+    if not dtsi_path.is_file():
+        return None, None, f"no layout at {dtsi_path.relative_to(MODULE_DIR.parent)}"
+    overlays = [dtsi_path]
+    boot_overlay = MODULE_DIR.parent / "boot" / "zephyr" / "app.overlay"
+    if mcuboot and boot_overlay.is_file():
+        overlays.append(boot_overlay)
+    build_dir = MODULE_DIR / f"build-check-{board_key}"
+    err = cmake_only_build(board_id, build_dir, overlays=overlays, fatal=False)
+    if err is not None:
+        detail = next(
+            (l.strip() for l in err.splitlines() if "devicetree error" in l),
+            "see the build log",
+        )
+        return None, None, f"layout does not resolve: {detail}"
+    edt = load_edt(build_dir)
+    return resolved_layout(edt, erase_overrides), edt, None
+
+
 def fix_alignment(board_key, vendor, edt, flash_overrides=None):
     """Plan and write the partition portion to
     dts/<vendor>/<board_key>.dtsi.
@@ -1079,16 +1580,16 @@ def fix_alignment(board_key, vendor, edt, flash_overrides=None):
     for dev_label, total_size, erase_size, parts, *rest in planned:
         predefined = rest[0] if rest else set()
         kind_parts = [
-            (l, s, e, i)
-            for l, s, e, i in discover_all_flash(edt, flash_overrides)
-            if l == dev_label
+            (lbl, s, e, i)
+            for lbl, s, e, i in discover_all_flash(edt, flash_overrides)
+            if lbl == dev_label
         ]
         kind = "internal" if kind_parts and kind_parts[0][3] else "external"
         print(
             f"  {dev_label} ({format_size(total_size)}, {kind})"
             f"  erase page: {format_size(erase_size)}"
         )
-        for label, node_label, offset, size in parts:
+        for label, _node_label, offset, size in parts:
             marker = " (predefined)" if label in predefined else ""
             print(
                 f"    {label}: 0x{offset:x} + {format_dt_size(size)} ({format_size(size)}){marker}"
@@ -1111,7 +1612,13 @@ def main():
     parser = argparse.ArgumentParser(
         description="Visualize or fix the flash partition layout owned by this mcuboot fork."
     )
-    parser.add_argument("board", nargs="?", help="Partition key (dtsi stem, e.g. nrf54l15dk)")
+    parser.add_argument(
+        "boards",
+        nargs="*",
+        metavar="BOARD",
+        help="Partition keys (dtsi stems, e.g. nrf54l15dk). Several may be given. "
+        "The read-only modes default to every declared board; --lock does not.",
+    )
     parser.add_argument(
         "--fix",
         action="store_true",
@@ -1123,33 +1630,297 @@ def main():
         action="store_true",
         help="Regenerate dts/mcuboot_boards.cmake and dts/Kconfig.sysbuild",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Resolve dts/<vendor>/<board>.dtsi and verify the layout it produces, "
+        "including against the layout lock (all declared boards when no board is given)",
+    )
+    parser.add_argument(
+        "--lock",
+        action="store_true",
+        help=f"Record the layouts of the named boards in {LOCK_PATH.name} as the "
+        "compatible ones, replacing what was locked before",
+    )
+    parser.add_argument(
+        "--gen-docs",
+        action="store_true",
+        help=f"Write the flash map of every board to {DOCS_PATH.name}",
+    )
+    parser.add_argument(
+        "--audit",
+        action="store_true",
+        help="Report regions the board's own DTS reserves that the layout drops "
+        "(radio/coprocessor images, secure storage, vendor config) -- a report "
+        "to read, not a pass/fail gate",
+    )
     args = parser.parse_args()
+
+    if args.audit:
+        for other in ("check", "lock", "gen_docs", "fix", "gen_list"):
+            if getattr(args, other, False):
+                print(
+                    f"--audit reports on the layout rather than acting on it; run it "
+                    f"on its own, not with --{other.replace('_', '-')}.",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+        keys = args.boards or sorted(boards)
+        unresolved = []
+        for key in keys:
+            entry = boards[key]
+            print(f"\n=== {key} ({entry['board']})")
+            baseline = baseline_layout(key, entry["board"])
+            if baseline is None:
+                print("  baseline does not resolve; skipped")
+                unresolved.append(key)
+                continue
+            devices, edt, err = resolve_board(
+                key, entry.get("vendor"), entry["board"], entry["mcuboot"]
+            )
+            if err is not None:
+                print(f"  {err}")
+                unresolved.append(key)
+                continue
+            unallocated, replaced = audit_dropped(baseline, partition_map(edt))
+            if not unallocated and not replaced:
+                print("  nothing the board reserved was dropped")
+                continue
+            for dev_label, label, offset, size, _ in unallocated:
+                print(
+                    f"  UNALLOCATED  {label} ({dev_label} 0x{offset:x}, "
+                    f"{format_size(size)}) is no longer reserved by anything"
+                )
+            for dev_label, label, offset, size, covering in replaced:
+                print(
+                    f"  replaced     {label} ({dev_label} 0x{offset:x}, "
+                    f"{format_size(size)}) now sits under {', '.join(covering)}"
+                )
+        if unresolved:
+            # The report is only as complete as the boards it could resolve.
+            print(
+                f"\n{len(unresolved)} board(s) could not be audited: "
+                f"{', '.join(unresolved)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        sys.exit(0)
 
     if args.gen_list:
         gen_mcuboot_boards_cmake()
         gen_kconfig_sysbuild()
         sys.exit(0)
 
-    if args.list or not args.board:
+    unknown = [b for b in args.boards if b not in boards]
+    if unknown:
+        print(f"Unknown board(s): {', '.join(unknown)}", file=sys.stderr)
+        print("\nDeclared boards:", file=sys.stderr)
+        for key in sorted(boards):
+            print(f"  {key}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.lock and not args.boards:
+        # Writing the lock is the one operation that changes what devices in
+        # the field are built around, so the boards it touches are named rather
+        # than swept up by a bare invocation.
+        print(
+            "--lock writes the compatibility contract, so it takes the boards to "
+            "lock by name:\n    partition_layout.py --lock <board> [<board> ...]\n"
+            "Use --check with no board to see which boards are not locked yet.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if args.lock and args.check:
+        # One asks whether the layout still matches the lock, the other
+        # declares the layout to be the new lock. Together the changed boards
+        # -- the only ones a lock run is for -- would be rejected as drift and
+        # left unlocked, which reads as success and does nothing.
+        print(
+            "--lock and --check contradict each other: --check verifies against the "
+            "lock, --lock replaces it. Run --check first, then --lock to accept.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if args.check or args.lock or args.gen_docs:
+        keys = args.boards or sorted(boards)
+        locked = load_lock() if args.check else None
+        fingerprints = {}
+        doc_lines = []
+        failed = []
+        drifted = {}
+        for key in keys:
+            entry = boards[key]
+            overrides = {}
+            ef = entry.get("external_flash")
+            if ef:
+                overrides[ef["label"]] = ef["erase_block_size"]
+            print(f"Resolving {key} ({entry['board']})...")
+            devices, edt, err = resolve_board(
+                key, entry.get("vendor"), entry["board"], entry["mcuboot"], overrides
+            )
+            if err is not None:
+                failed.append(key)
+                print(f"  FAIL  {err}")
+                continue
+            board_docs = render_board_markdown(key, entry["board"], devices)
+            # The layout is checked in every mode: a layout with a problem is
+            # not one to lock in, and there is no point documenting it as
+            # settled either.
+            problems = check_layout(edt) + check_roles(devices, entry["mcuboot"])
+            # Drift is kept apart from defects on purpose. A defect means the
+            # layout is wrong and someone has to fix it; drift means the layout
+            # is fine but no longer the one that was published, which is a
+            # decision, not a repair. Reporting both as FAIL leaves the reader
+            # to work out which of the two they are looking at.
+            breaking = []
+            if locked is not None and key in locked:
+                breaking, additions = compare_fingerprint(
+                    locked[key], layout_fingerprint(devices)
+                )
+                for addition in additions:
+                    print(f"  note  {addition}")
+            if problems:
+                failed.append(key)
+                for problem in problems:
+                    print(f"  FAIL  {problem}")
+            elif breaking:
+                drifted[key] = breaking
+                print("  CHANGED since it was locked:")
+                for line in breaking:
+                    print(f"      {line}")
+            else:
+                fingerprints[key] = layout_fingerprint(devices)
+                # Only a layout that passed gets documented: a map drawn from a
+                # broken one shows invented addresses.
+                doc_lines.extend(board_docs)
+                if locked is not None and key not in locked:
+                    print("  ok (not in the layout lock)")
+                else:
+                    print("  ok")
+
+        if args.lock:
+            if not fingerprints:
+                print(
+                    "\nNothing to lock: no board resolved cleanly.", file=sys.stderr
+                )
+                sys.exit(1)
+            existing = load_lock() or {}
+            # Re-locking is how a deliberate layout change is accepted, so it
+            # has to show what is being accepted. Overwriting the entry in
+            # silence would let a partition move through the one gate meant to
+            # catch exactly that.
+            # Naming the boards is the deliberate act, so there is no second
+            # confirmation flag. What a run replaces is still stated plainly,
+            # and the lock file is reviewed as a diff like any other source.
+            replaced = []
+            for key, fingerprint in sorted(fingerprints.items()):
+                if key not in existing:
+                    print(f"  + {key}: locked for the first time")
+                    continue
+                breaking, additions = compare_fingerprint(existing[key], fingerprint)
+                if not breaking and not additions:
+                    continue
+                replaced.append(key)
+                print(f"  ! {key}: replacing a layout that was already locked")
+                for line in breaking:
+                    print(f"      breaking  {line}")
+                for line in additions:
+                    print(f"      added     {line}")
+            existing.update(fingerprints)
+            write_lock(existing)
+            print(
+                f"\nLocked {len(fingerprints)} board(s) in "
+                f"{LOCK_PATH.relative_to(MODULE_DIR.parent)}"
+            )
+            if replaced:
+                rel = LOCK_PATH.relative_to(MODULE_DIR.parent)
+                print(
+                    f"Replaced the published layout of {', '.join(replaced)}: devices "
+                    f"already carrying the old one will not match it.\n"
+                    f"The previous lock is the committed one -- `git diff {rel}` shows "
+                    f"what this changed, `git checkout {rel}` puts it back."
+                )
+            if failed:
+                print(
+                    f"Left unlocked, they need fixing first: {', '.join(failed)}",
+                    file=sys.stderr,
+                )
+
+        if args.gen_docs:
+            header = [
+                "# Flash layouts",
+                "",
+                "Generated by `python3 tools/partition_layout.py --gen-docs`; do not",
+                "edit by hand. Every map here is read back out of the resolved",
+                "devicetree, so it shows what a board actually gets rather than what",
+                "the layout was meant to say.",
+                "",
+                "Legend: " + ", ".join(f"`{c}` {d}" for c, d in FILL.values() if d),
+                "",
+            ]
+            if args.boards:
+                print(
+                    f"\nRefusing to write {DOCS_PATH.name} from a subset of boards: it "
+                    "documents every board, and writing it here would drop the rest. "
+                    "Run --gen-docs with no board named.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            DOCS_PATH.write_text("\n".join(header + doc_lines).rstrip() + "\n")
+            print(f"\nWrote {DOCS_PATH.relative_to(MODULE_DIR.parent)}")
+
+        # A failing board still fails, whichever mode asked for the sweep --
+        # otherwise a CI line that regenerates docs is permanently green.
+        status = 0
+        if failed:
+            print(
+                f"\n{len(failed)} board(s) with layout problems, to fix: "
+                f"{', '.join(failed)}"
+            )
+            status = 1
+        if drifted:
+            names = " ".join(sorted(drifted))
+            print(
+                f"\n{len(drifted)} board(s) no longer match the layout they were "
+                f"locked with. Nothing is wrong with them -- decide whether the change "
+                f"should reach devices already in the field.\n"
+                f"  To publish it:   partition_layout.py --lock {names}\n"
+                f"  To drop it:      revert the layout change"
+            )
+            status = 1
+        if status:
+            sys.exit(status)
+        if args.lock or args.gen_docs:
+            sys.exit(0)
+
+        if failed:
+            print(f"\n{len(failed)} board(s) with layout problems: {', '.join(failed)}")
+            sys.exit(1)
+        sys.exit(0)
+
+    if args.list or not args.boards:
         print("Declared boards (* = standalone, no mcuboot):")
         for key, entry in sorted(boards.items()):
             marker = "" if entry["mcuboot"] else " *"
             print(f"  {key:24s} -> {entry['board']}{marker}")
         sys.exit(0 if args.list else 1)
 
-    if args.board not in boards:
-        print(f"Unknown board: {args.board}", file=sys.stderr)
-        print("\nDeclared boards:")
-        for key in sorted(boards):
-            print(f"  {key}")
-        sys.exit(1)
+    if len(args.boards) > 1 and not args.fix:
+        print(
+            "Showing a layout works on one board at a time; name just one.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
-    entry = boards[args.board]
+    board = args.boards[0]
+    entry = boards[board]
     if not entry["mcuboot"]:
         print(
-            f"{args.board} is a standalone board (mcuboot = false in boards.toml): "
+            f"{board} is a standalone board (mcuboot = false in boards.toml): "
             "its layout is a hand-maintained zephyr,mapped-partition overlay, not "
-            f"something this planner emits. Edit dts/<vendor>/{args.board}.dtsi by hand.",
+            f"something this planner emits. Edit dts/<vendor>/{board}.dtsi by hand.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1162,18 +1933,18 @@ def main():
     if ef:
         flash_overrides[ef["label"]] = {"erase_block_size": ef["erase_block_size"]}
 
-    build_dir = MODULE_DIR / f"build-partitions-{args.board}"
+    build_dir = MODULE_DIR / f"build-partitions-{board}"
 
     print(f"Running cmake-only build for {board_id}...")
     cmake_only_build(board_id, build_dir)
 
     edt = load_edt(build_dir)
 
-    print(f"  {args.board} -- Partition Layout")
+    print(f"  {board} -- Partition Layout")
     print()
 
     if args.fix:
-        fix_alignment(args.board, vendor, edt, flash_overrides)
+        fix_alignment(board, vendor, edt, flash_overrides)
     else:
         split = plan_code_partition_split(edt, flash_overrides)
         if split is not None:
@@ -1190,7 +1961,7 @@ def main():
             sys.exit(0)
         devices = extract_flash_devices(edt, flash_overrides)
         if not devices:
-            print(f"No flash devices with partitions found for {args.board}")
+            print(f"No flash devices with partitions found for {board}")
             sys.exit(1)
         show_layout(devices)
 
