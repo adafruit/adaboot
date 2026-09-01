@@ -48,7 +48,7 @@
 			reg = <0x0 DT_SIZE_K(1360)>;
 		};
 
-		filesystem_partition: partition@154000 {
+		littlefs_partition: partition@154000 {
 			label = "filesystem";
 			reg = <0x154000 DT_SIZE_K(6832)>;
 		};

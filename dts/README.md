@@ -21,11 +21,18 @@ these shared role labels:
 | `image-2`    | `netcore_partition`    | net/radio core firmware       |
 | `storage`    | `storage_partition`    | Zephyr settings / BT bonding  |
 | `nvm`        | `nvm_partition`        | raw non-volatile byte access  |
-| `filesystem` | `filesystem_partition` | user filesystem (CIRCUITPY / Arduino data / Wip) |
+| `filesystem` | `fatfs_partition` or `littlefs_partition` | user filesystem (CIRCUITPY / Arduino data / Wip) |
 
 These are the **only** labels applications should reference (via
 `FIXED_PARTITION_ID(<node_label>)`). The geometry is owned here, not by any
 application.
+
+The filesystem partition's node label says which filesystem it hosts: boards
+with a native USB device controller (`zephyr_udc0` enabled in the board DTS) get
+`fatfs_partition`, since the drive is exposed over USB mass storage and must be
+PC-readable; boards without native USB get `littlefs_partition`. The planner
+picks the name from the devicetree (`tools/partition_layout.py`), and the role
+label stays `filesystem` either way.
 
 ## mcuboot vs standalone
 

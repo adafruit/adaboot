@@ -353,7 +353,10 @@ MANAGED_NODE_LABELS = {
     "slot1_partition",
     "storage_partition",
     "nvm_partition",
-    "filesystem_partition",
+    # The filesystem node label is fatfs_partition on boards with native USB
+    # and littlefs_partition on the rest (see filesystem_node_label).
+    "fatfs_partition",
+    "littlefs_partition",
 }
 
 
@@ -466,6 +469,54 @@ def glue_deleted_partition_devices(glue_path):
         if re.search(r"/delete-node/\s*partitions\s*;", block):
             result.add(dev_label)
     return result
+
+
+def mapped_partition_devices(edt):
+    """Device node labels that can carry ``zephyr,mapped-partition`` children.
+
+    Zephyr's gen_defines.py requires every ``zephyr,mapped-partition`` node to
+    descend from an NVM memory node whose compatible list literally contains
+    ``soc-nv-flash`` (the binding include alone is not enough), and
+    ``DT_MTD_FROM_MAPPED_PARTITION`` resolves the flash device through that
+    node's parent -- correct for a ``flash@0`` under a flash-controller device,
+    wrong for a NOR hanging off a QSPI/OSPI bus. SoCs that spell their NVM nodes
+    differently (Renesas RA's ``renesas,ra-nv-code-flash``, external NORs like
+    ``renesas,ra-qspi-nor``) therefore cannot use mapped partitions; their
+    partitions stay classic ``fixed-partitions`` children, which everything
+    (PARTITION_ID(), flash_map, the bootloader's CMake) still supports.
+    """
+    result = set()
+    for node in edt.nodes:
+        if "soc-nv-flash" in getattr(node, "compats", []):
+            result.update(node.labels or [node.name])
+    return result
+
+
+def has_native_usb(edt):
+    """Whether the board's devicetree enables a native USB device controller.
+
+    Zephyr's USB device stack binds to the node carrying the ``zephyr_udc0``
+    label. A board with one can present the filesystem as a USB mass-storage
+    drive (CIRCUITPY), which requires a PC-readable format (FAT); boards
+    without one use littlefs instead.
+    """
+    for node in edt.nodes:
+        if "zephyr_udc0" not in getattr(node, "labels", []):
+            continue
+        if getattr(node, "status", "okay") == "okay":
+            return True
+    return False
+
+
+def filesystem_node_label(edt):
+    """The filesystem partition's node label, chosen by native USB.
+
+    ``fatfs_partition`` when the board has native USB (the partition is served
+    over USB mass storage, so it must be FAT) and ``littlefs_partition`` when
+    it does not. The ``label = "filesystem"`` role stays the same either way;
+    only the node label applications reference changes.
+    """
+    return "fatfs_partition" if has_native_usb(edt) else "littlefs_partition"
 
 
 def _swap_supported(edt):
@@ -634,6 +685,7 @@ def plan_partitions_predefined(
     data_flash = [(l, s, e) for l, s, e, i in all_flash if i and s < 64 * KB]
     external = [(l, s, e) for l, s, e, i in all_flash if not i and s >= 1 * MB]
     secondary_slot = not single_app and (_swap_supported(edt) or overwrite_only)
+    fs_node_label = filesystem_node_label(edt)
 
     result = []
     for dev_label, total_size, erase_size, parts, internal in devices:
@@ -763,7 +815,7 @@ def plan_partitions_predefined(
 
             fs_size = align_down(ext_size - cursor, ext_erase)
             if fs_size > 0:
-                ext_parts.append(("filesystem", "filesystem_partition", cursor, fs_size))
+                ext_parts.append(("filesystem", fs_node_label, cursor, fs_size))
 
             result.append((ext_label, ext_size, ext_erase, ext_parts, set()))
         else:
@@ -806,7 +858,7 @@ def plan_partitions_predefined(
 
             fs_size = align_down(total_size - cursor, erase_size)
             if fs_size > 0:
-                kept.append(("filesystem", "filesystem_partition", cursor, fs_size))
+                kept.append(("filesystem", fs_node_label, cursor, fs_size))
 
             result.append((dev_label, total_size, erase_size, kept, predefined))
 
@@ -990,6 +1042,8 @@ def plan_partitions(
     if not all_flash:
         return []
 
+    fs_node_label = filesystem_node_label(edt)
+
     # Separate small internal data flash (< 64 KB) from main internal flash.
     # Data flash (e.g. RA6/RA8 flash1) has small erase pages ideal for NVM.
     data_flash = [(l, s, e) for l, s, e, i in all_flash if i and s < 64 * KB]
@@ -1035,7 +1089,7 @@ def plan_partitions(
             result.append((int_label, int_size, int_erase, int_parts, set()))
 
             fs_size = align_down(ext_size, ext_erase)
-            ext_parts = [("filesystem", "filesystem_partition", 0, fs_size)]
+            ext_parts = [("filesystem", fs_node_label, 0, fs_size)]
             result.append((ext_label, ext_size, ext_erase, ext_parts, set()))
             # NVM comes from the data flash device (if any) at the end of
             # this function.
@@ -1085,7 +1139,7 @@ def plan_partitions(
                 ext_parts.append(("nvm", "nvm_partition", nvm_ext_offset, nvm_ext_size))
             ext_parts += [
                 ("image-1", "slot1_partition", slot1_offset, slot1_size),
-                ("filesystem", "filesystem_partition", fs_offset, fs_size),
+                ("filesystem", fs_node_label, fs_offset, fs_size),
             ]
             result.append((ext_label, ext_size, ext_erase, ext_parts, set()))
 
@@ -1114,7 +1168,7 @@ def plan_partitions(
         ]
         if nvm_size > 0:
             int_parts.append(("nvm", "nvm_partition", nvm_offset, nvm_size))
-        int_parts.append(("filesystem", "filesystem_partition", fs_offset, fs_size))
+        int_parts.append(("filesystem", fs_node_label, fs_offset, fs_size))
         result.append((int_label, int_size, int_erase, int_parts, set()))
 
     elif external:
@@ -1142,7 +1196,7 @@ def plan_partitions(
             ("image-1", "slot1_partition", slot1_offset, slot1_size),
             ("storage", "storage_partition", storage_offset, storage_size),
             ("nvm", "nvm_partition", nvm_offset, nvm_size),
-            ("filesystem", "filesystem_partition", fs_offset, fs_size),
+            ("filesystem", fs_node_label, fs_offset, fs_size),
         ]
         result.append((ext_label, ext_size, ext_erase, ext_parts, set()))
 
@@ -1158,13 +1212,18 @@ def plan_partitions(
     return result
 
 
-def generate_partitions_dtsi(planned_devices):
+def generate_partitions_dtsi(planned_devices, mapped_devices=None):
     """Generate the partition portion of a partitions .dtsi file.
 
     Each entry in planned_devices is:
         (dev_label, total_size, erase_size, parts, predefined_labels)
     where predefined_labels is a set of partition labels already defined in the
     upstream DTS. Those partitions are skipped in the generated output.
+
+    mapped_devices is the set of device labels that may carry
+    ``zephyr,mapped-partition`` children (see mapped_partition_devices()); None
+    means every device may (kept for callers that don't know the board's NVM
+    compatibles).
     """
     lines = []
 
@@ -1186,7 +1245,8 @@ def generate_partitions_dtsi(planned_devices):
         for label, node_label, offset, size in new_parts:
             lines.append("")
             lines.append(f"\t\t{node_label}: partition@{offset:x} {{")
-            lines.append('\t\t\tcompatible = "zephyr,mapped-partition";')
+            if mapped_devices is None or dev_label in mapped_devices:
+                lines.append('\t\t\tcompatible = "zephyr,mapped-partition";')
             # Carried board-specific partitions may have no `label` property
             # (e.g. the nRF54H20 VPR code regions); keep them unlabeled.
             if label:
@@ -1765,7 +1825,11 @@ def fix_alignment(
             )
         print()
 
-    content = partitions_dtsi_header(board_key, vendor) + "\n" + generate_partitions_dtsi(planned)
+    content = (
+        partitions_dtsi_header(board_key, vendor)
+        + "\n"
+        + generate_partitions_dtsi(planned, mapped_partition_devices(edt))
+    )
 
     dtsi_dir.mkdir(parents=True, exist_ok=True)
     partitions_path.write_text(content)

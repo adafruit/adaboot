@@ -48,7 +48,7 @@
 			reg = <0x0 DT_SIZE_K(1872)>;
 		};
 
-		filesystem_partition: partition@1d4000 {
+		fatfs_partition: partition@1d4000 {
 			label = "filesystem";
 			reg = <0x1d4000 DT_SIZE_K(6320)>;
 		};

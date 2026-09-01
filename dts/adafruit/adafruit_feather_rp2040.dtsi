@@ -39,7 +39,7 @@
 			reg = <0x180800 0x800>;
 		};
 
-		filesystem_partition: partition@181000 {
+		fatfs_partition: partition@181000 {
 			compatible = "zephyr,mapped-partition";
 			label = "filesystem";
 			reg = <0x181000 (DT_SIZE_M(8) - 0x181000)>;

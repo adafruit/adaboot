@@ -24,11 +24,14 @@ from partition_layout import (
     render_bar,
     render_detail_lines,
     generate_partitions_dtsi,
+    mapped_partition_devices,
     plan_partitions,
     _has_predefined_mcuboot,
     discover_all_flash,
     get_erase_size,
     get_total_size,
+    has_native_usb,
+    filesystem_node_label,
     ZEPHYR_BASE,
 )
 
@@ -77,6 +80,19 @@ def _partition_node(label, node_label, offset, size):
             "label": _prop(label),
             "reg": _prop([offset, size]),
         },
+    )
+
+
+def _usb_node(labels=("zephyr_udc0",), status="okay"):
+    """Build a minimal fake USB device controller node (no reg/props needed:
+    the planner only looks at its labels and status)."""
+    return SimpleNamespace(
+        name="usbd",
+        labels=list(labels),
+        props={},
+        compats=["vendor,usbd"],
+        children={},
+        status=status,
     )
 
 
@@ -222,7 +238,7 @@ class TestRenderBar:
         parts = [
             ("mcuboot", "boot_partition", 0, 64 * KB),
             ("image-0", "slot0_partition", 64 * KB, 448 * KB),
-            ("filesystem", "filesystem_partition", 512 * KB, 512 * KB),
+            ("filesystem", "fatfs_partition", 512 * KB, 512 * KB),
         ]
         bar = render_bar(parts, 1 * MB)
         assert len(bar) == 72
@@ -346,6 +362,109 @@ class TestDiscoverAllFlash:
         edt = _make_edt(node)
         devices = discover_all_flash(edt)
         assert devices[0][3] is False  # is_internal
+
+
+# ── Unit tests: mapped-partition capability ───────────────────────────
+
+
+class TestMappedPartitionDevices:
+    def test_soc_nv_flash_device_is_mapped_capable(self):
+        flash = SimpleNamespace(
+            name="flash@0",
+            labels=["flash0"],
+            compats=["vendor,nv-flash", "soc-nv-flash"],
+        )
+        edt = _make_edt(flash)
+        assert mapped_partition_devices(edt) == {"flash0"}
+
+    def test_ra_style_device_is_not_mapped_capable(self):
+        """Renesas RA code flash includes the soc-nv-flash *binding* but does
+        not carry the literal compatible, so it cannot host mapped partitions."""
+        flash = SimpleNamespace(
+            name="flash@0",
+            labels=["flash0"],
+            compats=["renesas,ra-nv-code-flash"],
+        )
+        nor = SimpleNamespace(
+            name="qspi-nor-flash@60000000",
+            labels=["mx25l25645g"],
+            compats=["renesas,ra-qspi-nor"],
+        )
+        edt = _make_edt(flash, nor)
+        assert mapped_partition_devices(edt) == set()
+
+
+# ── Unit tests: native USB detection ───────────────────────────
+
+
+class TestNativeUsb:
+    def test_no_usb_nodes(self):
+        edt = _make_edt(_internal_flash())
+        assert has_native_usb(edt) is False
+        assert filesystem_node_label(edt) == "littlefs_partition"
+
+    def test_udc0_enabled(self):
+        edt = _make_edt(_internal_flash(), _usb_node())
+        assert has_native_usb(edt) is True
+        assert filesystem_node_label(edt) == "fatfs_partition"
+
+    def test_udc0_disabled(self):
+        """A disabled controller is not available, even if it exists."""
+        edt = _make_edt(_internal_flash(), _usb_node(status="disabled"))
+        assert has_native_usb(edt) is False
+        assert filesystem_node_label(edt) == "littlefs_partition"
+
+    def test_other_usb_node_without_label(self):
+        """A USB node without the zephyr_udc0 label is not the device stack's
+        controller (e.g. a host controller on nrf54lm20dk)."""
+        edt = _make_edt(
+            _internal_flash(),
+            _usb_node(labels=("usbhs", "zephyr_uhc0")),
+        )
+        assert has_native_usb(edt) is False
+
+
+class TestFilesystemNodeLabel:
+    def test_internal_only_gets_littlefs_without_usb(self):
+        edt = _make_edt(_internal_flash())
+        result = plan_partitions(edt)
+        _, _, _, parts, _ = result[0]
+        fs = [p for p in parts if p[0] == "filesystem"][0]
+        assert fs[1] == "littlefs_partition"
+
+    def test_internal_only_gets_fatfs_with_usb(self):
+        edt = _make_edt(_internal_flash(), _usb_node())
+        result = plan_partitions(edt)
+        _, _, _, parts, _ = result[0]
+        fs = [p for p in parts if p[0] == "filesystem"][0]
+        assert fs[1] == "fatfs_partition"
+
+    def test_external_gets_fatfs_with_usb(self):
+        edt = _make_edt(
+            _internal_flash(), _external_flash(), _usb_node()
+        )
+        result = plan_partitions(edt)
+        ext = [r for r in result if r[0] == "mx25r"][0]
+        fs = [p for p in ext[3] if p[0] == "filesystem"][0]
+        assert fs[1] == "fatfs_partition"
+
+    def test_external_only_gets_fatfs_with_usb(self):
+        edt = _make_edt(
+            _external_flash(size=16 * MB, erase=4096), _usb_node()
+        )
+        result = plan_partitions(edt)
+        _, _, _, parts, _ = result[0]
+        fs = [p for p in parts if p[0] == "filesystem"][0]
+        assert fs[1] == "fatfs_partition"
+
+    def test_predefined_gets_fatfs_with_usb(self):
+        """Predefined layouts also pick the node label from the board USB."""
+        flash = _flash_with_partitions("flash0", 4 * MB, 4096, _DA14695_PARTITIONS)
+        edt = _make_edt(flash, _usb_node())
+        result = plan_partitions(edt)
+        _, _, _, parts, _ = result[0]
+        fs = [p for p in parts if p[0] == "filesystem"][0]
+        assert fs[1] == "fatfs_partition"
 
 
 # ── Unit tests: plan_partitions ──────────────────────────────────────────
@@ -624,7 +743,7 @@ class TestGeneratePartitionsDtsi:
                     ("mcuboot", "boot_partition", 0, 64 * KB),
                     ("image-0", "slot0_partition", 64 * KB, 192 * KB),
                     ("storage", "storage_partition", 256 * KB, 4096),
-                    ("filesystem", "filesystem_partition", 260 * KB, 252 * KB),
+                    ("filesystem", "littlefs_partition", 260 * KB, 252 * KB),
                 ],
             )
         ]
@@ -636,6 +755,44 @@ class TestGeneratePartitionsDtsi:
         assert "DT_SIZE_K(64)" in dtsi
         assert "slot0_partition: partition@10000" in dtsi
         assert dtsi.count('compatible = "zephyr,mapped-partition"') == 4
+
+    def test_mapped_only_for_soc_nv_flash_devices(self):
+        """mapped_devices limits zephyr,mapped-partition to devices whose NVM
+        node literally carries soc-nv-flash (Renesas RA code/data flash and
+        QSPI/OSPI NORs do not, so their partitions stay plain fixed-partitions
+        children -- Zephyr's gen_defines otherwise errors out)."""
+        planned = [
+            (
+                "flash0",
+                1 * MB,
+                4096,
+                [("mcuboot", "boot_partition", 0, 64 * KB)],
+            ),
+            (
+                "mx25l25645g",
+                16 * MB,
+                4096,
+                [("filesystem", "fatfs_partition", 0, 16 * MB)],
+            ),
+        ]
+        dtsi = generate_partitions_dtsi(planned, {"flash0"})
+        assert dtsi.count('compatible = "zephyr,mapped-partition"') == 1
+        # The plain fixed-partitions style is emitted for the NOR device.
+        assert "&mx25l25645g {" in dtsi
+        assert 'label = "filesystem"' in dtsi
+
+    def test_mapped_disabled_everywhere_with_empty_set(self):
+        planned = [
+            (
+                "flash0",
+                1 * MB,
+                4096,
+                [("mcuboot", "boot_partition", 0, 64 * KB)],
+            )
+        ]
+        dtsi = generate_partitions_dtsi(planned, set())
+        assert 'compatible = "zephyr,mapped-partition"' not in dtsi
+        assert "boot_partition: partition@0" in dtsi
 
     def test_empty_parts_skipped(self):
         planned = [("flash0", 512 * KB, 4096, [])]
@@ -654,7 +811,7 @@ class TestGeneratePartitionsDtsi:
                 "mx25r",
                 16 * MB,
                 4096,
-                [("filesystem", "filesystem_partition", 0, 16 * MB)],
+                [("filesystem", "fatfs_partition", 0, 16 * MB)],
             ),
         ]
         dtsi = generate_partitions_dtsi(planned)
@@ -675,7 +832,7 @@ class TestGeneratePartitionsDtsi:
                     ("image-1", "slot1_partition", 0x90000, 512 * KB),
                     ("storage", "storage_partition", 0x110000, 32 * KB),
                     ("nvm", "nvm_partition", 0x118000, 4096),
-                    ("filesystem", "filesystem_partition", 0x119000, 4 * MB - 0x119000),
+                    ("filesystem", "littlefs_partition", 0x119000, 4 * MB - 0x119000),
                 ],
                 predefined,
             )
@@ -820,9 +977,13 @@ class TestPredefinedMcuboot:
 
     def test_existing_app_partitions_replaced(self):
         """Existing filesystem/nvm partitions from a prior overlay should be replaced."""
-        # Simulate da14695 with its overlay-added filesystem partition
+        # Simulate da14695 with its overlay-added filesystem partition. The
+        # board's fake EDT here has no USB node, so the regenerated node label
+        # is littlefs_partition; the entry is dropped from the plan (via the
+        # label = "filesystem" role in APP_PARTITION_LABELS) and re-added at a
+        # new offset regardless of its previous one.
         parts_with_app = _DA14695_PARTITIONS + [
-            ("filesystem", "filesystem_partition", 0x118000, 4 * MB - 0x118000),
+            ("filesystem", "littlefs_partition", 0x118000, 4 * MB - 0x118000),
         ]
         flash = _flash_with_partitions("flash0", 4 * MB, 4096, parts_with_app)
         edt = _make_edt(flash)
@@ -841,3 +1002,5 @@ class TestPredefinedMcuboot:
         # The filesystem offset should differ (nvm now takes a page before it)
         fs = [p for p in parts if p[0] == "filesystem"][0]
         assert fs[2] != 0x118000  # not the old overlay offset
+        # ...and the node label is regenerated under its new name
+        assert fs[1] == "littlefs_partition"

@@ -3,12 +3,22 @@
  *
  * The filesystem and a settings partition live on the external QSPI flash
  * (ext_flash). The upstream board DTS already partitions ext_flash with a
- * partition at 0x7800000, which is deleted here and replaced with storage +
- * filesystem (the remainder of the 8 MB external flash).
+ * storage partition covering the whole device, which is deleted here and
+ * replaced with storage + filesystem in the last 8 MB of the flash.
+ *
+ * The board has a native USB OTG FS connector, so the filesystem partition
+ * is fatfs (exposed over USB mass storage) and the controller is enabled
+ * here: the upstream board DTS leaves usbotg_fs disabled.
  */
+zephyr_udc0: &usbotg_fs {
+	pinctrl-0 = <&usb_otg_fs_dm_pa11 &usb_otg_fs_dp_pa12>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
 &ext_flash {
 	partitions {
-		/delete-node/ partition@7800000;
+		/delete-node/ partition@0;
 
 		storage_partition: partition@7800000 {
 			compatible = "zephyr,mapped-partition";
@@ -16,7 +26,7 @@
 			reg = <0x7800000 DT_SIZE_K(32)>;
 		};
 
-		filesystem_partition: partition@7808000 {
+		fatfs_partition: partition@7808000 {
 			compatible = "zephyr,mapped-partition";
 			label = "filesystem";
 			reg = <0x7808000 (DT_SIZE_M(8) - DT_SIZE_K(32))>;

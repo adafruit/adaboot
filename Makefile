@@ -181,9 +181,9 @@ build:
 	  -DEXTRA_ZEPHYR_MODULES=$(ADABOOT_DIR) \
 	  -DEXTRA_DTC_OVERLAY_FILE=$(OVERLAY) \
 	  -DEXTRA_CONF_FILE="$(BOOT_CONF_FILE)"
-	@cp $(BUILD)/zephyr/zephyr.bin $(BUILD)/mcuboot.bin
+	@python3 $(ADABOOT_DIR)/tools/boot_partition_bin.py $(BUILD)
 	@-cp $(BUILD)/zephyr/zephyr.hex $(BUILD)/mcuboot.hex 2>/dev/null || true
-	@echo "==> $(BUILD)/mcuboot.bin  (elf/hex in $(BUILD)/zephyr/)"
+	@echo "==> $(BUILD)/mcuboot.bin  (boot partition image; elf/hex in $(BUILD)/zephyr/)"
 
 # Build the bootloader-updater application for one board.
 #
