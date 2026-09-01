@@ -39,9 +39,11 @@ CONF_DIR = MODULE_DIR / "conf"
 # Mirrors Zephyr's sysbuild image_configurations/BOOTLOADER_image_default.cmake
 # (SB_CONFIG_MCUBOOT_MODE_* -> CONFIG_*), but for a direct boot/zephyr build
 # rather than a sysbuild. "single_app" boots a single slot (no OTA secondary);
+# "overwrite_only" copies an update from slot1 onto slot0 without rollback;
 # "ram_load" copies the newer image to RAM before jumping to it.
 MODE_CONFIG = {
     "single_app": "CONFIG_SINGLE_APPLICATION_SLOT=y",
+    "overwrite_only": "CONFIG_BOOT_UPGRADE_ONLY=y",
     "ram_load": "CONFIG_BOOT_RAM_LOAD=y",
 }
 

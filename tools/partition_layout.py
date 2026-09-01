@@ -597,7 +597,12 @@ def _has_predefined_mcuboot(edt, flash_overrides=None):
 
 
 def plan_partitions_predefined(
-    edt, flash_overrides=None, existing=None, deleted_devices=None, single_app=False
+    edt,
+    flash_overrides=None,
+    existing=None,
+    deleted_devices=None,
+    single_app=False,
+    overwrite_only=False,
 ):
     """Plan partitions for boards with a predefined mcuboot layout.
 
@@ -628,7 +633,7 @@ def plan_partitions_predefined(
     all_flash = discover_all_flash(edt, flash_overrides)
     data_flash = [(l, s, e) for l, s, e, i in all_flash if i and s < 64 * KB]
     external = [(l, s, e) for l, s, e, i in all_flash if not i and s >= 1 * MB]
-    swap_ok = _swap_supported(edt) and not single_app
+    secondary_slot = not single_app and (_swap_supported(edt) or overwrite_only)
 
     result = []
     for dev_label, total_size, erase_size, parts, internal in devices:
@@ -656,7 +661,7 @@ def plan_partitions_predefined(
         # upstream layout is kept in place instead.
         grow_ext = (
             [(l, s, e) for l, s, e in external if l != dev_label]
-            if swap_ok and not single_app
+            if secondary_slot
             else []
         )
 
@@ -730,11 +735,11 @@ def plan_partitions_predefined(
             result.append((dev_label, total_size, erase_size, int_parts, set()))
 
             # External: slot1 + filesystem
-            # slot1 needs slot0_size + 1 max-erase sector for mcuboot
-            # swap-using-offset scratch area.
+            # Swap-using-offset needs one extra max-erase sector in slot1.
+            # Overwrite-only copies slot1 onto slot0 and needs no scratch.
             ext_carry = existing.get(ext_label, {})
             ext_carried = sorted(ext_carry.get("carried", []), key=lambda c: c[2])
-            slot1_size = slot0_size + max_erase
+            slot1_size = slot0_size if overwrite_only else slot0_size + max_erase
             ext_parts = []
             cursor = 0
 
@@ -936,7 +941,14 @@ def generate_mapped_split_dtsi(plan):
     return "\n".join(lines)
 
 
-def plan_partitions(edt, flash_overrides=None, existing=None, deleted_devices=None, single_app=False):
+def plan_partitions(
+    edt,
+    flash_overrides=None,
+    existing=None,
+    deleted_devices=None,
+    single_app=False,
+    overwrite_only=False,
+):
     """Determine the partition layout based on available flash devices.
 
     If the board already has a predefined mcuboot layout (from the upstream
@@ -966,7 +978,12 @@ def plan_partitions(edt, flash_overrides=None, existing=None, deleted_devices=No
     # Check for predefined mcuboot layout first.
     if _has_predefined_mcuboot(edt, flash_overrides):
         return plan_partitions_predefined(
-            edt, flash_overrides, existing, deleted_devices, single_app
+            edt,
+            flash_overrides,
+            existing,
+            deleted_devices,
+            single_app,
+            overwrite_only,
         )
 
     all_flash = discover_all_flash(edt, flash_overrides)
@@ -979,7 +996,7 @@ def plan_partitions(edt, flash_overrides=None, existing=None, deleted_devices=No
     internal = [(l, s, e) for l, s, e, i in all_flash if i and s >= 64 * KB]
     # Filter out tiny external flash regions
     external = [(l, s, e) for l, s, e, i in all_flash if not i and s >= 1 * MB]
-    swap_ok = _swap_supported(edt) and not single_app
+    secondary_slot = not single_app and (_swap_supported(edt) or overwrite_only)
 
     MCUBOOT_SIZE = 128 * KB
     result = []
@@ -997,7 +1014,7 @@ def plan_partitions(edt, flash_overrides=None, existing=None, deleted_devices=No
         boot_size = align_up(MCUBOOT_SIZE, int_erase)
         slot0_offset = boot_size
 
-        if not swap_ok:
+        if not secondary_slot:
             # ── Single-app: no slot1 / swap, so no max_erase rounding and no
             # scratch sector; slot0 fills internal flash up to the app tail
             # and the filesystem takes all of the external flash. ──
@@ -1043,9 +1060,9 @@ def plan_partitions(edt, flash_overrides=None, existing=None, deleted_devices=No
             result.append((int_label, int_size, int_erase, int_parts, set()))
 
             # External: slot1 + filesystem (and storage/nvm if they didn't fit internally)
-            # slot1 is slot0 + 1 sector of the largest erase size (mcuboot
-            # swap-using-offset needs the extra sector as a scratch area).
-            slot1_size = slot0_size + max_erase
+            # Swap-using-offset needs one extra max-erase sector in slot1.
+            # Overwrite-only copies slot1 onto slot0 and needs no scratch.
+            slot1_size = slot0_size if overwrite_only else slot0_size + max_erase
             nvm_on_ext = not data_flash
             nvm_ext_size = ext_erase if nvm_on_ext else 0
 
@@ -1169,6 +1186,7 @@ def generate_partitions_dtsi(planned_devices):
         for label, node_label, offset, size in new_parts:
             lines.append("")
             lines.append(f"\t\t{node_label}: partition@{offset:x} {{")
+            lines.append('\t\t\tcompatible = "zephyr,mapped-partition";')
             # Carried board-specific partitions may have no `label` property
             # (e.g. the nRF54H20 VPR code regions); keep them unlabeled.
             if label:
@@ -1602,6 +1620,7 @@ def gen_all_sectors_conf():
                 existing=parse_existing_partitions_dtsi(partitions_path),
                 deleted_devices=glue_deleted_partition_devices(glue_path),
                 single_app=entry.get("single_app", False),
+                overwrite_only=entry["mcuboot_mode"] == "overwrite_only",
             )
             gen_sectors_conf(key, planned if planned else [], nor_page_layout_kconfigs(edt))
 
@@ -1663,7 +1682,14 @@ def ensure_glue_dtsi(board_key, vendor):
     print(f"  Wrote {dtsi_path.relative_to(MODULE_DIR.parent)}")
 
 
-def fix_alignment(board_key, vendor, edt, flash_overrides=None, single_app=False):
+def fix_alignment(
+    board_key,
+    vendor,
+    edt,
+    flash_overrides=None,
+    single_app=False,
+    overwrite_only=False,
+):
     """Plan and write the partition layout to
     dts/<vendor>/<board>-partitions.dtsi.
 
@@ -1712,6 +1738,7 @@ def fix_alignment(board_key, vendor, edt, flash_overrides=None, single_app=False
         existing=parse_existing_partitions_dtsi(partitions_path),
         deleted_devices=glue_deleted_partition_devices(dtsi_dir / f"{board_key}.dtsi"),
         single_app=single_app,
+        overwrite_only=overwrite_only,
     )
     if not planned:
         print("  No flash devices found to plan partitions for.")
@@ -1822,7 +1849,14 @@ def main():
     print()
 
     if args.fix:
-        fix_alignment(args.board, vendor, edt, flash_overrides, single_app=entry.get("single_app", False))
+        fix_alignment(
+            args.board,
+            vendor,
+            edt,
+            flash_overrides,
+            single_app=entry.get("single_app", False),
+            overwrite_only=entry["mcuboot_mode"] == "overwrite_only",
+        )
     else:
         split = plan_code_partition_split(edt, flash_overrides)
         if split is not None:

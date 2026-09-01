@@ -45,6 +45,9 @@ vendor = "renesas"
 [boards.ek_ra8d1]
 board = "ek_ra8d1"
 vendor = "renesas"
+# Keep a secondary slot for Ethernet-delivered updates. RA8 code flash has a
+# 128-byte write block, so use overwrite-only rather than a swap mode.
+mcuboot_mode = "overwrite_only"
 
 [boards.frdm_mcxn947]
 board = "frdm_mcxn947/mcxn947/cpu0"

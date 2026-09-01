@@ -507,6 +507,22 @@ class TestPlanPartitions:
             assert offset % erase_size == 0, f"{label} offset not aligned"
             assert size % erase_size == 0, f"{label} size not aligned"
 
+    def test_overwrite_only_keeps_slot1_with_large_write_block(self):
+        """Overwrite mode supports an RA8-like flash that cannot swap."""
+        edt = _make_edt(
+            _internal_flash(size=2 * MB, erase=32 * KB),
+            _external_flash(size=64 * MB, erase=4096),
+        )
+        edt.chosen_node = lambda name: SimpleNamespace(
+            props={"write-block-size": _prop(128)}
+        )
+
+        result = plan_partitions(edt, overwrite_only=True)
+        int_parts = {p[0]: p for p in result[0][3]}
+        ext_parts = {p[0]: p for p in result[1][3]}
+
+        assert ext_parts["image-1"][3] == int_parts["image-0"][3]
+
     def test_small_external_ignored(self):
         """External flash < 1MB should be ignored (e.g. small SPI flash)."""
         edt = _make_edt(
@@ -619,6 +635,7 @@ class TestGeneratePartitionsDtsi:
         assert 'label = "mcuboot"' in dtsi
         assert "DT_SIZE_K(64)" in dtsi
         assert "slot0_partition: partition@10000" in dtsi
+        assert dtsi.count('compatible = "zephyr,mapped-partition"') == 4
 
     def test_empty_parts_skipped(self):
         planned = [("flash0", 512 * KB, 4096, [])]
