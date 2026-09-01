@@ -17,27 +17,27 @@
 
 		boot_partition: partition@0 {
 			label = "mcuboot";
-			reg = <0x0 DT_SIZE_K(128)>;
+			reg = <0x0 DT_SIZE_K(64)>;
 		};
 
-		slot0_partition: partition@20000 {
+		slot0_partition: partition@10000 {
 			label = "image-0";
-			reg = <0x20000 DT_SIZE_K(952)>;
+			reg = <0x10000 DT_SIZE_K(928)>;
 		};
 
-		storage_partition: partition@10e000 {
+		storage_partition: partition@f8000 {
 			label = "storage";
-			reg = <0x10e000 DT_SIZE_K(8)>;
+			reg = <0xf8000 DT_SIZE_K(32)>;
 		};
 
-		nvm_partition: partition@110000 {
+		nvm_partition: partition@100000 {
 			label = "nvm";
-			reg = <0x110000 DT_SIZE_K(8)>;
+			reg = <0x100000 DT_SIZE_K(8)>;
 		};
 
-		filesystem_partition: partition@112000 {
+		filesystem_partition: partition@102000 {
 			label = "filesystem";
-			reg = <0x112000 DT_SIZE_K(952)>;
+			reg = <0x102000 DT_SIZE_K(1016)>;
 		};
 	};
 };

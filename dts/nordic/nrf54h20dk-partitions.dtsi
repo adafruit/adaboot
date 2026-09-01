@@ -27,7 +27,11 @@
 			reg = <0x50000 DT_SIZE_K(1344)>;
 		};
 
-		/* VPR code partitions — labels must exist for SoC DTS references. */
+		storage_partition: partition@1f8000 {
+			label = "storage";
+			reg = <0x1f8000 DT_SIZE_K(32)>;
+		};
+
 		cpuppr_code_partition: partition@e4000 {
 			reg = <0xe4000 DT_SIZE_K(64)>;
 		};
@@ -40,16 +44,6 @@
 			label = "image-2";
 			reg = <0x1a0000 DT_SIZE_K(352)>;
 		};
-
-		nvm_partition: partition@1f8000 {
-			label = "nvm";
-			reg = <0x1f8000 DT_SIZE_K(16)>;
-		};
-
-		storage_partition: partition@1fc000 {
-			label = "storage";
-			reg = <0x1fc000 DT_SIZE_K(16)>;
-		};
 	};
 };
 
@@ -59,14 +53,19 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		slot1_partition: partition@0 {
-			label = "image-1";
-			reg = <0x0 DT_SIZE_K(1348)>;
+		nvm_partition: partition@0 {
+			label = "nvm";
+			reg = <0x0 DT_SIZE_K(4)>;
 		};
 
-		filesystem_partition: partition@151000 {
+		slot1_partition: partition@1000 {
+			label = "image-1";
+			reg = <0x1000 DT_SIZE_K(1348)>;
+		};
+
+		filesystem_partition: partition@152000 {
 			label = "filesystem";
-			reg = <0x151000 DT_SIZE_K(6844)>;
+			reg = <0x152000 DT_SIZE_K(6840)>;
 		};
 	};
 };

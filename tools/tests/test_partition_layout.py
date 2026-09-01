@@ -459,9 +459,10 @@ class TestPlanPartitions:
     def test_ra6_internal_32k_external_4k(self):
         """RA6-like: 2MB internal @ 32K erase, 16MB external @ 4K erase.
 
-        slot0 should be 62 * 32K pages (filling internal after mcuboot).
-        slot1 must be 63 * 32K pages -- one extra max_erase sector for
-        mcuboot swap-using-offset scratch, even though external is 4K pages.
+        slot0 should be 60 * 32K pages (filling internal after the 128K
+        mcuboot partition). slot1 must be 61 * 32K pages -- one extra
+        max_erase sector for mcuboot swap-using-offset scratch, even though
+        external is 4K pages.
         """
         edt = _make_edt(
             _internal_flash(size=2 * MB, erase=32 * KB),
@@ -473,12 +474,12 @@ class TestPlanPartitions:
         int_parts = {p[0]: p for p in result[0][3]}
         ext_parts = {p[0]: p for p in result[1][3]}
 
-        # slot0 fills internal after 64K mcuboot, aligned to 32K
-        assert int_parts["mcuboot"][3] == 64 * KB
-        assert int_parts["image-0"][3] == 62 * 32 * KB
+        # slot0 fills internal after the 128K mcuboot, aligned to 32K
+        assert int_parts["mcuboot"][3] == 128 * KB
+        assert int_parts["image-0"][3] == 60 * 32 * KB
 
         # slot1 = slot0 + one 32K sector (max_erase), NOT one 4K sector
-        assert ext_parts["image-1"][3] == 63 * 32 * KB
+        assert ext_parts["image-1"][3] == 61 * 32 * KB
 
         # All partitions on each device must be aligned to that device's erase
         for dev_label, total_size, erase_size, parts, _ in result:
@@ -732,8 +733,13 @@ class TestPredefinedMcuboot:
         # New partitions added
         assert "nvm" in labels
         assert "filesystem" in labels
-        # Predefined set should contain the original labels
-        assert predefined == {"mcuboot", "image-0", "image-1", "storage"}
+        # Predefined set should contain the original labels. storage is NOT
+        # predefined: the fork always regenerates it (STORAGE_SIZE) at the
+        # end of the kept upstream partitions.
+        assert predefined == {"mcuboot", "image-0", "image-1"}
+        storage = [p for p in parts if p[0] == "storage"][0]
+        assert storage[2] == 0x110000
+        assert storage[3] == 32 * KB
 
     def test_predefined_preserves_original_offsets(self):
         """Original partition offsets and sizes should be unchanged."""

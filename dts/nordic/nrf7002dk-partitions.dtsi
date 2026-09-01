@@ -17,12 +17,17 @@
 
 		boot_partition: partition@0 {
 			label = "mcuboot";
-			reg = <0x0 DT_SIZE_K(64)>;
+			reg = <0x0 DT_SIZE_K(128)>;
 		};
 
-		slot0_partition: partition@10000 {
+		slot0_partition: partition@20000 {
 			label = "image-0";
-			reg = <0x10000 DT_SIZE_K(960)>;
+			reg = <0x20000 DT_SIZE_K(864)>;
+		};
+
+		storage_partition: partition@f8000 {
+			label = "storage";
+			reg = <0xf8000 DT_SIZE_K(32)>;
 		};
 	};
 };
@@ -38,14 +43,9 @@
 			reg = <0x0 DT_SIZE_K(4)>;
 		};
 
-		storage_partition: partition@1000 {
-			label = "storage";
-			reg = <0x1000 DT_SIZE_K(4)>;
-		};
-
-		slot1_partition: partition@2000 {
+		slot1_partition: partition@1000 {
 			label = "image-1";
-			reg = <0x2000 DT_SIZE_K(964)>;
+			reg = <0x1000 DT_SIZE_K(868)>;
 		};
 
 		nrf70_fw_partition: partition@f3000 {

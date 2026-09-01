@@ -38,12 +38,19 @@ import argparse
 import os
 import pathlib
 import pickle
+import re
 import subprocess
 import sys
 import tomllib
 
 KB = 1024
 MB = 1024 * 1024
+
+# Storage (Zephyr settings: BLE bonding keys, etc.) partition size. The
+# planner sizes every storage partition it adds at this many bytes, rounded
+# up to the device's erase-block size (a predefined upstream storage
+# partition keeps its own size).
+STORAGE_SIZE = 32 * KB
 
 BAR_WIDTH = 72
 
@@ -131,6 +138,11 @@ def load_boards_manifest():
             "vendor": entry.get("vendor"),
             "external_flash": entry.get("external_flash"),
             "mcuboot_mode": entry.get("mcuboot_mode", DEFAULT_MCUBOOT_MODE),
+            # Plan a single-app layout (no image-1) even when the flash
+            # geometry would allow a second slot: used for boards with no
+            # wireless loading path, where the filesystem gets the space
+            # instead (the fork's partitioning philosophy).
+            "single_app": entry.get("single_app", False),
             # Standalone (UF2-native / XIP / not-yet-on-mcuboot) boards are
             # registered in boards.toml with mcuboot = false so the dts/ tree and
             # this registry stay in sync, but the planner does not own their
@@ -271,6 +283,12 @@ def discover_all_flash(edt, flash_overrides=None):
         # Skip flash controllers (they wrap the actual flash node)
         if any("controller" in c for c in node.compats):
             continue
+        # Skip raw NAND: Zephyr exposes no plain flash driver for it, so it
+        # cannot host slots, storage or the filesystem (boards use it via a
+        # dedicated driver and its own upstream partition, e.g. rw612's
+        # nand-storage).
+        if any("nand" in c for c in node.compats):
+            continue
         if has_override:
             erase_size = flash_overrides[dev_label]["erase_block_size"]
         else:
@@ -288,16 +306,31 @@ def extract_flash_devices(edt, flash_overrides=None):
         if not hasattr(node, "children") or "partitions" not in node.children:
             continue
         partitions_node = node.children["partitions"]
-        if "fixed-partitions" not in getattr(partitions_node, "compats", []):
+        # Accept both the classic `compatible = "fixed-partitions"` grouping
+        # and the newer bare `partitions { ranges; }` style (Nordic, NXP)
+        # whose children are zephyr,mapped-partition nodes.
+        has_reg_children = any("reg" in p.props for p in partitions_node.children.values())
+        if "fixed-partitions" not in getattr(partitions_node, "compats", []) and not has_reg_children:
             continue
         dev_label = node.labels[0] if node.labels else node.name
         parts = []
         for pname, pnode in partitions_node.children.items():
-            label_prop = pnode.props.get("label")
             reg_prop = pnode.props.get("reg")
-            if label_prop and reg_prop:
-                node_label = pnode.labels[0] if pnode.labels else pname
-                parts.append((label_prop.val, node_label, reg_prop.val[0], reg_prop.val[1]))
+            if not reg_prop:
+                continue
+            label_prop = pnode.props.get("label")
+            node_label = pnode.labels[0] if pnode.labels else pname
+            # Partitions without a `label` property are keyed by their node
+            # label (e.g. the nRF54H20 VPR code regions) so the planner can
+            # see -- and preserve -- regions it does not manage.
+            parts.append(
+                (
+                    label_prop.val if label_prop else node_label,
+                    node_label,
+                    reg_prop.val[0],
+                    reg_prop.val[1],
+                )
+            )
         partitions_by_label[dev_label] = parts
 
     # Return all flash devices, attaching partitions where they exist
@@ -306,6 +339,154 @@ def extract_flash_devices(edt, flash_overrides=None):
         parts = partitions_by_label.get(dev_label, [])
         devices.append((dev_label, total_size, erase_size, parts, internal))
     return devices
+
+
+# Node labels of the partitions the planner owns and regenerates on every
+# --fix. Any other partition node label found in a previously generated
+# layout is carried forward unchanged: those are board-specific regions the
+# generic layout must keep (e.g. the nRF54H20's SoC-referenced VPR code
+# regions and its netcore firmware region, or nrf7002dk's nRF70 co-processor
+# firmware region).
+MANAGED_NODE_LABELS = {
+    "boot_partition",
+    "slot0_partition",
+    "slot1_partition",
+    "storage_partition",
+    "nvm_partition",
+    "filesystem_partition",
+}
+
+
+def parse_existing_partitions_dtsi(path):
+    """Parse a previously generated <board>-partitions.dtsi.
+
+    --fix rewrites that file, but some boards carry board-specific partitions
+    the planner cannot derive (VPR code regions a SoC phandle points at, a
+    netcore / co-processor firmware region). Those are seeded by hand once
+    and must survive regeneration, so --fix reads the current file first and
+    carries them forward: every partition whose node labels the planner does
+    not manage is preserved at its current offset and size, and slot0 growth
+    is capped so it does not clobber a carried partition that lived outside
+    the previous slot0.
+
+    Returns {dev_label: {"slot0": (offset, size) or None,
+                         "carried": [(label_prop or None, node_label, offset, size)]}}.
+    """
+    result = {}
+    path = pathlib.Path(path)
+    if not path.exists():
+        return result
+
+    dev_re = re.compile(r"^&(\w+)\s*\{")
+    part_re = re.compile(r"^\s+([\w:]+):\s*partition@([0-9a-f]+)\s*\{")
+    label_re = re.compile(r'label\s*=\s*"([^"]+)"')
+    reg_re = re.compile(r"reg\s*=\s*<\s*0x([0-9a-f]+)\s+([^>]+?)\s*>")
+
+    def parse_size(text):
+        text = text.strip()
+        m = re.fullmatch(r"DT_SIZE_K\((\d+)\)", text)
+        if m:
+            return int(m.group(1)) * KB
+        m = re.fullmatch(r"DT_SIZE_M\((\d+)\)", text)
+        if m:
+            return int(m.group(1)) * MB
+        if text.startswith("0x"):
+            return int(text, 16)
+        return None
+
+    current_dev = None
+    pending = None  # (node_labels_str, label_prop or None, offset)
+    pending_size = None
+
+    def commit():
+        nonlocal pending, pending_size
+        if current_dev is None or pending is None or pending_size is None:
+            return
+        node_labels_str, label_prop, offset = pending
+        pending = None
+        size = pending_size
+        pending_size = None
+        labels = [lbl for lbl in re.split(r"\s*:\s*", node_labels_str) if lbl]
+        dev = result.setdefault(current_dev, {"slot0": None, "carried": []})
+        if any(lbl in MANAGED_NODE_LABELS for lbl in labels):
+            if "slot0_partition" in labels:
+                dev["slot0"] = (offset, size)
+            return
+        dev["carried"].append((label_prop, labels[0], offset, size))
+
+    for line in path.read_text().splitlines():
+        m = dev_re.match(line)
+        if m:
+            commit()
+            current_dev = m.group(1)
+            continue
+        m = part_re.match(line)
+        if m:
+            commit()
+            pending = (m.group(1), None, int(m.group(2), 16))
+            pending_size = None
+            continue
+        if current_dev is not None and pending is not None:
+            m = label_re.search(line)
+            if m:
+                pending = (pending[0], m.group(1), pending[2])
+                continue
+            m = reg_re.search(line)
+            if m:
+                pending_size = parse_size(m.group(2))
+                commit()
+    commit()
+    return result
+
+
+def glue_deleted_partition_devices(glue_path):
+    """Device labels whose whole `partitions` node the hand-maintained glue
+    deletes (`&dev { /delete-node/ partitions; };`).
+
+    For those devices the generated file must be self-contained: it has to
+    re-emit every partition (including the upstream boot/slot ones, since
+    the glue removed them) instead of skipping predefined partitions.
+    """
+    result = set()
+    path = pathlib.Path(glue_path)
+    if not path.exists():
+        return result
+    text = path.read_text()
+    for m in re.finditer(r"&(\w+)\s*\{", text):
+        dev_label = m.group(1)
+        depth = 1
+        i = m.end()
+        while i < len(text) and depth > 0:
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+            i += 1
+        block = text[m.end() : i]
+        if re.search(r"/delete-node/\s*partitions\s*;", block):
+            result.add(dev_label)
+    return result
+
+
+def _swap_supported(edt):
+    """Whether mcuboot's swap upgrade modes can run on this board.
+
+    Swap writes the image trailer at the chosen flash's write-block
+    alignment, and bootutil asserts MCUBOOT_BOOT_MAX_ALIGN is 8..32 bytes
+    for swap modes. Boards whose chosen flash programs in bigger blocks
+    (e.g. Renesas RA code flash: 128 bytes) cannot swap at all and get a
+    single-app layout (slot0 only, no image-1).
+    """
+    chosen = getattr(edt, "chosen_node", None)
+    node = chosen("zephyr,flash") if callable(chosen) else None
+    if node is None:
+        return True
+    prop = node.props.get("write-block-size")
+    if prop is None:
+        return True
+    # Like the Zephyr Kconfig default, the effective alignment is the max of
+    # the write-block-size and 8; swap needs it to be 8..32 bytes.
+    return max(prop.val, 8) <= 32
 
 
 # ── Rendering ────────────────────────────────────────────────────────────
@@ -415,25 +596,39 @@ def _has_predefined_mcuboot(edt, flash_overrides=None):
     return None
 
 
-def plan_partitions_predefined(edt, flash_overrides=None):
+def plan_partitions_predefined(
+    edt, flash_overrides=None, existing=None, deleted_devices=None, single_app=False
+):
     """Plan partitions for boards with a predefined mcuboot layout.
 
-    When external flash is available, slot1 is moved to external flash and
-    slot0 is grown to fill the freed internal space.  Layout:
-        Internal: mcuboot + slot0 (grown) + storage
-        External: nvm + slot1 (slot0 size + 1 max-erase sector) + filesystem
+    When the predefined mcuboot layout is on internal flash and separate
+    external flash is available, slot1 is moved to external flash and slot0
+    is grown to fill the freed internal space:
+        Internal: mcuboot + slot0 (grown) + [nvm] + storage
+        External: [nvm] + slot1 (slot0 size + 1 max-erase sector) + filesystem
 
-    When no external flash is available, upstream partitions are kept and
-    nvm/filesystem are added to the remaining free space on internal flash.
+    When there is no separate external flash -- or the mcuboot layout itself
+    lives on the external (XIP) flash -- the upstream slots are kept as-is
+    and the upstream storage partition is replaced by the fork's standard
+    tail appended after them:
+        storage (STORAGE_SIZE) + [nvm] + filesystem (rest)
+
+    Partitions carried from the previously generated layout (board-specific
+    regions the planner does not manage) are preserved, and slot0 growth is
+    capped so a carried partition that lived outside the previous slot0
+    (e.g. the nRF54H20 netcore firmware region) is never clobbered.
 
     Returns list of (dev_label, total_size, erase_size, [(label, node_label, offset, size)],
     predefined_labels) where predefined_labels is the set of partition labels from the
     upstream DTS (so the dtsi generator can skip them).
     """
+    existing = existing or {}
+    deleted_devices = deleted_devices or set()
     devices = extract_flash_devices(edt, flash_overrides)
     all_flash = discover_all_flash(edt, flash_overrides)
     data_flash = [(l, s, e) for l, s, e, i in all_flash if i and s < 64 * KB]
     external = [(l, s, e) for l, s, e, i in all_flash if not i and s >= 1 * MB]
+    swap_ok = _swap_supported(edt) and not single_app
 
     result = []
     for dev_label, total_size, erase_size, parts, internal in devices:
@@ -448,9 +643,26 @@ def plan_partitions_predefined(edt, flash_overrides=None):
                 result.append((dev_label, total_size, erase_size, list(upstream), predefined))
             continue
 
-        if external:
+        # Board-specific partitions carried from the previous generated
+        # layout, plus where the previous slot0 ended (partitions carried
+        # from inside it are allowed to stay overlapped; ones beyond it cap
+        # the new slot0 so they are not clobbered).
+        carry = existing.get(dev_label, {})
+        carried = sorted(carry.get("carried", []), key=lambda c: c[2])
+        old_slot0 = carry.get("slot0")
+
+        # Separate external flash the slots can spill into. XIP boards boot
+        # from the external flash itself, so it is not spare -- their
+        # upstream layout is kept in place instead.
+        grow_ext = (
+            [(l, s, e) for l, s, e in external if l != dev_label]
+            if swap_ok and not single_app
+            else []
+        )
+
+        if grow_ext:
             # ── Move slot1 to external flash, grow slot0 ──
-            ext_label, ext_size, ext_erase = external[0]
+            ext_label, ext_size, ext_erase = grow_ext[0]
             max_erase = max(erase_size, ext_erase)
 
             # Find the predefined mcuboot partition and ensure it's at
@@ -461,7 +673,9 @@ def plan_partitions_predefined(edt, flash_overrides=None):
 
             # Find the predefined storage partition (if any).
             storage_parts = [p for p in parts if p[0] == "storage"]
-            storage_size = storage_parts[0][3] if storage_parts else erase_size
+            storage_size = (
+                storage_parts[0][3] if storage_parts else align_up(STORAGE_SIZE, erase_size)
+            )
 
             # Place NVM on internal flash if internal is RRAM (good
             # endurance, small erase pages) or if data flash exists.
@@ -469,25 +683,47 @@ def plan_partitions_predefined(edt, flash_overrides=None):
             nvm_size = erase_size if nvm_on_internal and not data_flash else 0
 
             # Place storage + nvm at the end of internal flash, then grow
-            # slot0 to fill the remaining space.
+            # slot0 to fill the remaining space -- capped at the first
+            # carried partition that lived beyond the previous slot0.
             tail_size = storage_size + nvm_size
             tail_start = align_down(total_size - tail_size, erase_size)
             slot0_offset = align_up(boot_end, erase_size)
-            slot0_size = align_down(tail_start - slot0_offset, max_erase)
+            slot0_limit = tail_start
+            for c in carried:
+                if old_slot0 is None or c[2] >= old_slot0[0] + old_slot0[1]:
+                    slot0_limit = min(slot0_limit, c[2])
+                    break
+            slot0_size = align_down(slot0_limit - slot0_offset, max_erase)
 
             int_parts = [
                 ("mcuboot", "boot_partition", boot[2], boot_size),
                 ("image-0", "slot0_partition", slot0_offset, slot0_size),
             ]
 
-            cursor = slot0_offset + slot0_size
+            # Carried partitions live at their current offsets: ones inside
+            # the previous slot0 stay overlapped by the grown slot0 (SoC
+            # phandle references just need the labels to exist), ones beyond
+            # it were protected by the cap above. The app tail goes after
+            # whichever of slot0 / the carried partitions ends last.
+            carried_end = max((c[2] + c[3] for c in carried), default=0)
+            cursor = max(slot0_offset + slot0_size, align_up(carried_end, erase_size))
             if nvm_size > 0:
                 nvm_offset = align_up(cursor, erase_size)
                 int_parts.append(("nvm", "nvm_partition", nvm_offset, nvm_size))
                 cursor = nvm_offset + nvm_size
 
             storage_offset = align_up(cursor, erase_size)
+            if storage_offset + storage_size > total_size:
+                print(
+                    f"  Warning: {dev_label} has no room for the "
+                    f"{format_size(storage_size)} storage partition after the "
+                    "carried partitions; layout will overflow the device.",
+                    file=sys.stderr,
+                )
             int_parts.append(("storage", "storage_partition", storage_offset, storage_size))
+
+            for label_prop, node_label, off, size in carried:
+                int_parts.append((label_prop, node_label, off, size))
 
             # All partitions must be regenerated since the upstream partitions
             # node is deleted to allow slot0 to grow.
@@ -496,6 +732,8 @@ def plan_partitions_predefined(edt, flash_overrides=None):
             # External: slot1 + filesystem
             # slot1 needs slot0_size + 1 max-erase sector for mcuboot
             # swap-using-offset scratch area.
+            ext_carry = existing.get(ext_label, {})
+            ext_carried = sorted(ext_carry.get("carried", []), key=lambda c: c[2])
             slot1_size = slot0_size + max_erase
             ext_parts = []
             cursor = 0
@@ -506,8 +744,17 @@ def plan_partitions_predefined(edt, flash_overrides=None):
                 cursor = align_up(cursor + nvm_ext_size, ext_erase)
 
             slot1_offset = align_up(cursor, ext_erase)
+            if ext_carried:
+                # Shrink slot1 to fit in front of the first carried
+                # partition instead of clobbering it.
+                avail = align_down(ext_carried[0][2], ext_erase) - slot1_offset
+                slot1_size = min(slot1_size, align_down(avail, ext_erase))
             ext_parts.append(("image-1", "slot1_partition", slot1_offset, slot1_size))
             cursor = align_up(slot1_offset + slot1_size, ext_erase)
+
+            for label_prop, node_label, off, size in ext_carried:
+                ext_parts.append((label_prop, node_label, off, size))
+                cursor = max(cursor, align_up(off + size, ext_erase))
 
             fs_size = align_down(ext_size - cursor, ext_erase)
             if fs_size > 0:
@@ -515,16 +762,36 @@ def plan_partitions_predefined(edt, flash_overrides=None):
 
             result.append((ext_label, ext_size, ext_erase, ext_parts, set()))
         else:
-            # ── No external flash: keep upstream layout, add app partitions ──
-            upstream = [p for p in parts if p[0] not in APP_PARTITION_LABELS]
-            predefined = {p[0] for p in upstream}
+            # ── Keep the upstream slots; replace the upstream app tail ──
+            # No separate external flash (or XIP: the mcuboot layout lives
+            # on the external flash itself): upstream mcuboot/slot0/slot1 are
+            # kept as-is and the fork's storage/nvm/filesystem trio replaces
+            # whatever the upstream layout had after them.
+            upstream = [
+                p
+                for p in parts
+                if p[0] not in APP_PARTITION_LABELS
+                and p[0] != "storage"
+                and not (single_app and p[0] == "image-1")
+            ]
+            # When the hand-maintained glue deletes the whole upstream
+            # partitions node of this device, the generated file must be
+            # self-contained: re-emit the upstream partitions too (the
+            # board dts still references some of their labels), instead of
+            # relying on nodes the glue removed.
+            predefined = (
+                set() if dev_label in deleted_devices else {p[0] for p in upstream}
+            )
             kept = sorted(upstream, key=lambda p: p[2])
 
-            # Find the end of the last upstream partition.
-            last_end = max(p[2] + p[3] for p in kept)
-
-            # Add nvm + filesystem in the free space after the last partition.
+            # Find the end of the last kept upstream partition.
+            last_end = max((p[2] + p[3] for p in kept), default=0)
             cursor = align_up(last_end, erase_size)
+
+            storage_size = align_up(STORAGE_SIZE, erase_size)
+            if cursor + storage_size <= total_size:
+                kept.append(("storage", "storage_partition", cursor, storage_size))
+                cursor += storage_size
 
             if not data_flash:
                 nvm_size = erase_size
@@ -669,7 +936,7 @@ def generate_mapped_split_dtsi(plan):
     return "\n".join(lines)
 
 
-def plan_partitions(edt, flash_overrides=None):
+def plan_partitions(edt, flash_overrides=None, existing=None, deleted_devices=None, single_app=False):
     """Determine the partition layout based on available flash devices.
 
     If the board already has a predefined mcuboot layout (from the upstream
@@ -679,13 +946,15 @@ def plan_partitions(edt, flash_overrides=None):
     Otherwise, partitions are planned from scratch:
     - If internal flash exists and there is also external flash:
         Internal: mcuboot + slot0 (fills remaining internal flash)
-        External: storage (1 erase page) + slot1 (same size as slot0) + filesystem (rest)
+        External: storage (32 KB) + slot1 (same size as slot0) + filesystem (rest)
+        (single-app boards -- whose chosen flash cannot support mcuboot swap
+        -- get no slot1, and the filesystem fills the external flash)
     - If internal flash exists with no external flash:
-        Internal: mcuboot + slot0 + storage (1 erase page) + filesystem (rest)
+        Internal: mcuboot + slot0 + storage (32 KB) + filesystem (rest)
         No slot1 (no OTA update support).
     - If only external flash (XIP, e.g. FlexSPI):
-        External: mcuboot + slot0 + slot1 (same size as slot0) + filesystem (rest)
-        No storage partition.
+        External: mcuboot + slot0 + slot1 (same size as slot0) + storage (32 KB)
+        + nvm + filesystem (rest).
 
     NVM partition placement:
     - If small internal data flash exists (< 64 KB, e.g. RA6/RA8 data flash),
@@ -696,7 +965,9 @@ def plan_partitions(edt, flash_overrides=None):
     """
     # Check for predefined mcuboot layout first.
     if _has_predefined_mcuboot(edt, flash_overrides):
-        return plan_partitions_predefined(edt, flash_overrides)
+        return plan_partitions_predefined(
+            edt, flash_overrides, existing, deleted_devices, single_app
+        )
 
     all_flash = discover_all_flash(edt, flash_overrides)
     if not all_flash:
@@ -708,6 +979,7 @@ def plan_partitions(edt, flash_overrides=None):
     internal = [(l, s, e) for l, s, e, i in all_flash if i and s >= 64 * KB]
     # Filter out tiny external flash regions
     external = [(l, s, e) for l, s, e, i in all_flash if not i and s >= 1 * MB]
+    swap_ok = _swap_supported(edt) and not single_app
 
     MCUBOOT_SIZE = 128 * KB
     result = []
@@ -724,54 +996,81 @@ def plan_partitions(edt, flash_overrides=None):
         # Internal: mcuboot + slot0
         boot_size = align_up(MCUBOOT_SIZE, int_erase)
         slot0_offset = boot_size
-        slot0_size = align_down(int_size - slot0_offset, max_erase)
 
-        int_parts = [
-            ("mcuboot", "boot_partition", 0, boot_size),
-            ("image-0", "slot0_partition", slot0_offset, slot0_size),
-        ]
+        if not swap_ok:
+            # ── Single-app: no slot1 / swap, so no max_erase rounding and no
+            # scratch sector; slot0 fills internal flash up to the app tail
+            # and the filesystem takes all of the external flash. ──
+            storage_size = align_up(STORAGE_SIZE, int_erase)
+            nvm_size = int_erase if not data_flash else 0
+            slot0_size = align_down(
+                int_size - slot0_offset - storage_size - nvm_size, int_erase
+            )
+            int_parts = [
+                ("mcuboot", "boot_partition", 0, boot_size),
+                ("image-0", "slot0_partition", slot0_offset, slot0_size),
+            ]
+            cursor = slot0_offset + slot0_size
+            int_parts.append(("storage", "storage_partition", cursor, storage_size))
+            cursor += storage_size
+            if nvm_size:
+                int_parts.append(("nvm", "nvm_partition", cursor, nvm_size))
+            result.append((int_label, int_size, int_erase, int_parts, set()))
 
-        # If there's leftover internal space after slot0 (due to max_erase
-        # rounding), use it for storage instead of wasting external flash.
-        int_leftover = int_size - (slot0_offset + slot0_size)
-        storage_on_internal = int_leftover >= int_erase
-
-        if storage_on_internal:
-            storage_offset = slot0_offset + slot0_size
-            storage_size = align_down(int_leftover, int_erase)
-            int_parts.append(("storage", "storage_partition", storage_offset, storage_size))
-
-        result.append((int_label, int_size, int_erase, int_parts, set()))
-
-        # External: slot1 + filesystem (and storage/nvm if they didn't fit internally)
-        # slot1 is slot0 + 1 sector of the largest erase size (mcuboot
-        # swap-using-offset needs the extra sector as a scratch area).
-        slot1_size = slot0_size + max_erase
-        nvm_on_ext = not data_flash
-        nvm_ext_size = ext_erase if nvm_on_ext else 0
-
-        if storage_on_internal:
-            nvm_ext_offset = 0
-            slot1_offset = nvm_ext_size
+            fs_size = align_down(ext_size, ext_erase)
+            ext_parts = [("filesystem", "filesystem_partition", 0, fs_size)]
+            result.append((ext_label, ext_size, ext_erase, ext_parts, set()))
+            # NVM comes from the data flash device (if any) at the end of
+            # this function.
         else:
-            storage_size = ext_erase  # minimum: 1 erase page
-            nvm_ext_offset = storage_size
-            slot1_offset = nvm_ext_offset + nvm_ext_size
+            slot0_size = align_down(int_size - slot0_offset, max_erase)
 
-        slot1_offset = align_up(slot1_offset, ext_erase)
-        fs_offset = align_up(slot1_offset + slot1_size, ext_erase)
-        fs_size = align_down(ext_size - fs_offset, ext_erase)
+            int_parts = [
+                ("mcuboot", "boot_partition", 0, boot_size),
+                ("image-0", "slot0_partition", slot0_offset, slot0_size),
+            ]
 
-        ext_parts = []
-        if not storage_on_internal:
-            ext_parts.append(("storage", "storage_partition", 0, storage_size))
-        if nvm_on_ext:
-            ext_parts.append(("nvm", "nvm_partition", nvm_ext_offset, nvm_ext_size))
-        ext_parts += [
-            ("image-1", "slot1_partition", slot1_offset, slot1_size),
-            ("filesystem", "filesystem_partition", fs_offset, fs_size),
-        ]
-        result.append((ext_label, ext_size, ext_erase, ext_parts, set()))
+            # If there's leftover internal space after slot0 (due to max_erase
+            # rounding), use it for storage instead of wasting external flash.
+            int_leftover = int_size - (slot0_offset + slot0_size)
+            storage_size = align_up(STORAGE_SIZE, int_erase)
+            storage_on_internal = int_leftover >= storage_size
+
+            if storage_on_internal:
+                storage_offset = slot0_offset + slot0_size
+                int_parts.append(("storage", "storage_partition", storage_offset, storage_size))
+
+            result.append((int_label, int_size, int_erase, int_parts, set()))
+
+            # External: slot1 + filesystem (and storage/nvm if they didn't fit internally)
+            # slot1 is slot0 + 1 sector of the largest erase size (mcuboot
+            # swap-using-offset needs the extra sector as a scratch area).
+            slot1_size = slot0_size + max_erase
+            nvm_on_ext = not data_flash
+            nvm_ext_size = ext_erase if nvm_on_ext else 0
+
+            if storage_on_internal:
+                nvm_ext_offset = 0
+                slot1_offset = nvm_ext_size
+            else:
+                storage_size = align_up(STORAGE_SIZE, ext_erase)
+                nvm_ext_offset = storage_size
+                slot1_offset = nvm_ext_offset + nvm_ext_size
+
+            slot1_offset = align_up(slot1_offset, ext_erase)
+            fs_offset = align_up(slot1_offset + slot1_size, ext_erase)
+            fs_size = align_down(ext_size - fs_offset, ext_erase)
+
+            ext_parts = []
+            if not storage_on_internal:
+                ext_parts.append(("storage", "storage_partition", 0, storage_size))
+            if nvm_on_ext:
+                ext_parts.append(("nvm", "nvm_partition", nvm_ext_offset, nvm_ext_size))
+            ext_parts += [
+                ("image-1", "slot1_partition", slot1_offset, slot1_size),
+                ("filesystem", "filesystem_partition", fs_offset, fs_size),
+            ]
+            result.append((ext_label, ext_size, ext_erase, ext_parts, set()))
 
     elif internal:
         # ── Internal only ──
@@ -780,8 +1079,8 @@ def plan_partitions(edt, flash_overrides=None):
         boot_size = align_up(MCUBOOT_SIZE, int_erase)
         slot0_offset = boot_size
         # Reserve space at the end for storage + nvm + filesystem.
-        # Storage and NVM are each 1 erase page.
-        storage_size = int_erase
+        # NVM is 1 erase page; storage is STORAGE_SIZE.
+        storage_size = align_up(STORAGE_SIZE, int_erase)
         nvm_size = int_erase if not data_flash else 0
         # Give slot0 roughly half the remaining space.
         remaining = int_size - boot_size - storage_size - nvm_size
@@ -814,7 +1113,7 @@ def plan_partitions(edt, flash_overrides=None):
         slot1_offset = slot0_offset + slot0_size
         slot1_size = slot_size
         storage_offset = slot1_offset + slot1_size
-        storage_size = ext_erase  # minimum: 1 erase page
+        storage_size = align_up(STORAGE_SIZE, ext_erase)
         nvm_offset = storage_offset + storage_size
         nvm_size = ext_erase
         fs_offset = nvm_offset + nvm_size
@@ -870,7 +1169,10 @@ def generate_partitions_dtsi(planned_devices):
         for label, node_label, offset, size in new_parts:
             lines.append("")
             lines.append(f"\t\t{node_label}: partition@{offset:x} {{")
-            lines.append(f'\t\t\tlabel = "{label}";')
+            # Carried board-specific partitions may have no `label` property
+            # (e.g. the nRF54H20 VPR code regions); keep them unlabeled.
+            if label:
+                lines.append(f'\t\t\tlabel = "{label}";')
             lines.append(f"\t\t\treg = <0x{offset:x} {format_dt_size(size)}>;")
             lines.append("\t\t};")
 
@@ -1292,7 +1594,15 @@ def gen_all_sectors_conf():
         if split is not None:
             gen_sectors_conf(key, [], nor_page_layout_kconfigs(edt))
         else:
-            planned = plan_partitions(edt, flash_overrides)
+            partitions_path = DTS_OUT_DIR / entry["vendor"] / f"{key}-partitions.dtsi"
+            glue_path = DTS_OUT_DIR / entry["vendor"] / f"{key}.dtsi"
+            planned = plan_partitions(
+                edt,
+                flash_overrides,
+                existing=parse_existing_partitions_dtsi(partitions_path),
+                deleted_devices=glue_deleted_partition_devices(glue_path),
+                single_app=entry.get("single_app", False),
+            )
             gen_sectors_conf(key, planned if planned else [], nor_page_layout_kconfigs(edt))
 
 
@@ -1353,7 +1663,7 @@ def ensure_glue_dtsi(board_key, vendor):
     print(f"  Wrote {dtsi_path.relative_to(MODULE_DIR.parent)}")
 
 
-def fix_alignment(board_key, vendor, edt, flash_overrides=None):
+def fix_alignment(board_key, vendor, edt, flash_overrides=None, single_app=False):
     """Plan and write the partition layout to
     dts/<vendor>/<board>-partitions.dtsi.
 
@@ -1396,7 +1706,13 @@ def fix_alignment(board_key, vendor, edt, flash_overrides=None):
         gen_sectors_conf(board_key, [], nor_page_layout_kconfigs(edt))
         return
 
-    planned = plan_partitions(edt, flash_overrides)
+    planned = plan_partitions(
+        edt,
+        flash_overrides,
+        existing=parse_existing_partitions_dtsi(partitions_path),
+        deleted_devices=glue_deleted_partition_devices(dtsi_dir / f"{board_key}.dtsi"),
+        single_app=single_app,
+    )
     if not planned:
         print("  No flash devices found to plan partitions for.")
         return
@@ -1417,7 +1733,8 @@ def fix_alignment(board_key, vendor, edt, flash_overrides=None):
         for label, node_label, offset, size in parts:
             marker = " (predefined)" if label in predefined else ""
             print(
-                f"    {label}: 0x{offset:x} + {format_dt_size(size)} ({format_size(size)}){marker}"
+                f"    {label or node_label}: 0x{offset:x} + {format_dt_size(size)}"
+                f" ({format_size(size)}){marker}"
             )
         print()
 
@@ -1505,7 +1822,7 @@ def main():
     print()
 
     if args.fix:
-        fix_alignment(args.board, vendor, edt, flash_overrides)
+        fix_alignment(args.board, vendor, edt, flash_overrides, single_app=entry.get("single_app", False))
     else:
         split = plan_code_partition_split(edt, flash_overrides)
         if split is not None:

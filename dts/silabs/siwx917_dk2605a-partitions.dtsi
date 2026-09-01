@@ -9,6 +9,8 @@
  * this file.
  */
 
+/delete-node/ &code_partition;
+
 &flash0 {
 	partitions {
 		boot_partition: partition@202000 {

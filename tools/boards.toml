@@ -8,7 +8,10 @@
 # (mirroring the board folder layout). An optional [external_flash] table supplies
 # the erase-block-size for SPI NOR devices that don't expose it in their DTS
 # binding. An optional mcuboot_mode picks the SB_CONFIG_MCUBOOT_MODE_<mode> the
-# layout was planned for (default "single_app").
+# layout was planned for (default "single_app"). An optional single_app = true
+# forces a single-app layout (no image-1) even when the flash geometry would
+# allow a second slot -- for boards with no wireless loading path, where the
+# filesystem gets the space instead (the fork's partitioning philosophy).
 #
 # mcuboot = true (the default): the board boots via mcuboot (Adaboot). The
 # partition_layout.py planner generates its dtsi (`--fix`) and --gen-list puts
@@ -59,6 +62,10 @@ vendor = "nxp"
 board = "nrf5340dk/nrf5340/cpuapp"
 vendor = "nordic"
 
+[boards.nrf5340dk.external_flash]
+label = "mx25r64"
+erase_block_size = 4096
+
 [boards.nrf54h20dk]
 board = "nrf54h20dk/nrf54h20/cpuapp"
 vendor = "nordic"
@@ -104,6 +111,9 @@ erase_block_size = 4096
 [boards.nucleo_u575zi_q]
 board = "nucleo_u575zi_q/stm32u575xx"
 vendor = "st"
+# No radio / wireless loading: keep the fork's single-app layout (upstream's
+# image-1 is dropped) so the filesystem gets the space instead.
+single_app = true
 
 [boards.stm32h7b3i_dk]
 board = "stm32h7b3i_dk"
@@ -116,6 +126,10 @@ erase_block_size = 4096
 [boards.stm32wba65i_dk1]
 board = "stm32wba65i_dk1"
 vendor = "st"
+# Adaboot does not load images over the radio: keep the fork's single-app
+# layout (upstream's image-1 is dropped) so the filesystem gets the space
+# instead.
+single_app = true
 
 [boards.siwx917_dk2605a]
 board = "siwx917_dk2605a"

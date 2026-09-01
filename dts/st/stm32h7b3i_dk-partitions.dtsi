@@ -35,22 +35,22 @@
 
 		storage_partition: partition@0 {
 			label = "storage";
-			reg = <0x0 DT_SIZE_K(4)>;
+			reg = <0x0 DT_SIZE_K(32)>;
 		};
 
-		nvm_partition: partition@1000 {
+		nvm_partition: partition@8000 {
 			label = "nvm";
-			reg = <0x1000 DT_SIZE_K(4)>;
+			reg = <0x8000 DT_SIZE_K(4)>;
 		};
 
-		slot1_partition: partition@2000 {
+		slot1_partition: partition@9000 {
 			label = "image-1";
-			reg = <0x2000 DT_SIZE_K(1928)>;
+			reg = <0x9000 DT_SIZE_K(1928)>;
 		};
 
-		filesystem_partition: partition@1e4000 {
+		filesystem_partition: partition@1eb000 {
 			label = "filesystem";
-			reg = <0x1e4000 DT_SIZE_K(63600)>;
+			reg = <0x1eb000 DT_SIZE_K(63572)>;
 		};
 	};
 };

@@ -22,12 +22,12 @@
 
 		slot0_partition: partition@20000 {
 			label = "image-0";
-			reg = <0x20000 DT_SIZE_K(1728)>;
+			reg = <0x20000 DT_SIZE_K(1856)>;
 		};
 
-		storage_partition: partition@1d0000 {
+		storage_partition: partition@1f0000 {
 			label = "storage";
-			reg = <0x1d0000 DT_SIZE_K(160)>;
+			reg = <0x1f0000 DT_SIZE_K(32)>;
 		};
 	};
 };
@@ -38,14 +38,9 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		slot1_partition: partition@0 {
-			label = "image-1";
-			reg = <0x0 DT_SIZE_M(2)>;
-		};
-
-		filesystem_partition: partition@200000 {
+		filesystem_partition: partition@0 {
 			label = "filesystem";
-			reg = <0x200000 DT_SIZE_M(62)>;
+			reg = <0x0 DT_SIZE_M(64)>;
 		};
 	};
 };

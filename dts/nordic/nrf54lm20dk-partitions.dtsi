@@ -22,7 +22,17 @@
 
 		slot0_partition: partition@20000 {
 			label = "image-0";
-			reg = <0x20000 DT_SIZE_K(1908)>;
+			reg = <0x20000 DT_SIZE_K(1868)>;
+		};
+
+		nvm_partition: partition@1f3000 {
+			label = "nvm";
+			reg = <0x1f3000 DT_SIZE_K(4)>;
+		};
+
+		storage_partition: partition@1f4000 {
+			label = "storage";
+			reg = <0x1f4000 DT_SIZE_K(36)>;
 		};
 	};
 };
@@ -33,24 +43,14 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		storage_partition: partition@0 {
-			label = "storage";
-			reg = <0x0 DT_SIZE_K(4)>;
-		};
-
-		nvm_partition: partition@1000 {
-			label = "nvm";
-			reg = <0x1000 DT_SIZE_K(4)>;
-		};
-
-		slot1_partition: partition@2000 {
+		slot1_partition: partition@0 {
 			label = "image-1";
-			reg = <0x2000 DT_SIZE_K(1912)>;
+			reg = <0x0 DT_SIZE_K(1872)>;
 		};
 
-		filesystem_partition: partition@1e0000 {
+		filesystem_partition: partition@1d4000 {
 			label = "filesystem";
-			reg = <0x1e0000 DT_SIZE_K(6272)>;
+			reg = <0x1d4000 DT_SIZE_K(6320)>;
 		};
 	};
 };

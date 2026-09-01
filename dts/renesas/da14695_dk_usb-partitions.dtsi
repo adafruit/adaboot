@@ -15,31 +15,34 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		/* 0x0-0x2400 reserved for product header.
-		 * MCUboot limited to 64 KB cacheable area. */
 		boot_partition: partition@2400 {
 			label = "mcuboot";
-			reg = <0x2400 0xdc00>;
+			reg = <0x2400 DT_SIZE_K(55)>;
 		};
 
 		slot0_partition: partition@10000 {
 			label = "image-0";
-			reg = <0x10000 DT_SIZE_K(1024)>;
+			reg = <0x10000 DT_SIZE_K(512)>;
+		};
+
+		slot1_partition: partition@90000 {
+			label = "image-1";
+			reg = <0x90000 DT_SIZE_K(512)>;
 		};
 
 		storage_partition: partition@110000 {
 			label = "storage";
-			reg = <0x110000 DT_SIZE_K(4)>;
+			reg = <0x110000 DT_SIZE_K(32)>;
 		};
 
-		nvm_partition: partition@111000 {
+		nvm_partition: partition@118000 {
 			label = "nvm";
-			reg = <0x111000 DT_SIZE_K(4)>;
+			reg = <0x118000 DT_SIZE_K(4)>;
 		};
 
-		filesystem_partition: partition@112000 {
+		filesystem_partition: partition@119000 {
 			label = "filesystem";
-			reg = <0x112000 DT_SIZE_K(3000)>;
+			reg = <0x119000 DT_SIZE_K(2972)>;
 		};
 	};
 };
