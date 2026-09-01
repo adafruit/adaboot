@@ -82,6 +82,61 @@ static const struct gpio_dt_spec led0 = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 #error "Unsupported board: led0 devicetree alias is not defined"
 #endif
 
+/*
+ * Blinking LED indicator, matching the behaviour of
+ * Adafruit_nRF52_Bootloader and tinyuf2: the LED fades in a triangle
+ * pattern (breathing) whose tempo is selected by the cycle length --
+ * slow while idle, fast while waiting for firmware, very fast (reads
+ * as a plain blink) while flash is being written. Adafruit drives a
+ * hardware PWM with the duty cycle capped at 0x4f/0xff (~31%); we
+ * approximate it with a software PWM clocked by a 1 ms k_timer.
+ */
+#define LED_FADE_STEPS  16
+/* Peak brightness: ~31% duty cycle, like Adafruit's 0x4f/0xff cap. */
+#define LED_FADE_PEAK   5
+
+static struct k_timer led_blink_timer;
+static volatile uint32_t led_blink_ticks;
+/* 0 = solid (io_led_set() owns the pin), otherwise fade cycle in ms. */
+static volatile uint32_t led_blink_cycle_ms;
+
+static void led_blink_timer_fn(struct k_timer *timer)
+{
+    ARG_UNUSED(timer);
+
+    uint32_t cycle_ms = led_blink_cycle_ms;
+    if (cycle_ms == 0) {
+        return;
+    }
+
+    uint32_t tick = ++led_blink_ticks;
+
+    /* Triangle fade over the cycle, like Adafruit's led_tick(). */
+    uint32_t half = cycle_ms / 2;
+    uint32_t phase = tick % cycle_ms;
+    if (phase > half) {
+        phase = cycle_ms - phase;
+    }
+    uint32_t level = LED_FADE_PEAK * phase / half;
+
+    /* Software PWM: on for `level` of every LED_FADE_STEPS 1 ms slots. */
+    gpio_pin_set_dt(&led0, (int)((tick % LED_FADE_STEPS) < level));
+}
+
+void io_led_blink(uint32_t cycle_ms)
+{
+    if (cycle_ms == 0) {
+        return;
+    }
+
+    /* Keep the pattern phase when re-requesting the same tempo. */
+    if (led_blink_cycle_ms != cycle_ms) {
+        led_blink_ticks = 0;
+        led_blink_cycle_ms = cycle_ms;
+    }
+    k_timer_start(&led_blink_timer, K_NO_WAIT, K_MSEC(1));
+}
+
 void io_led_init(void)
 {
     if (!device_is_ready(led0.port)) {
@@ -91,10 +146,14 @@ void io_led_init(void)
 
     gpio_pin_configure_dt(&led0, GPIO_OUTPUT);
     gpio_pin_set_dt(&led0, 0);
+
+    k_timer_init(&led_blink_timer, led_blink_timer_fn, NULL);
 }
 
 void io_led_set(int value)
 {
+    led_blink_cycle_ms = 0;
+    k_timer_stop(&led_blink_timer);
     gpio_pin_set_dt(&led0, value);
 }
 #endif /* CONFIG_MCUBOOT_INDICATION_LED */

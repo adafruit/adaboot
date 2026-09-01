@@ -37,6 +37,9 @@
 #include <zephyr/sys/crc.h>
 #include <zephyr/sys/base64.h>
 #include <hal/hal_flash.h>
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+#include "io/io.h"
+#endif
 #elif __ESPRESSIF__
 #include <bootloader_utility.h>
 #include <esp_rom_sys.h>
@@ -1112,6 +1115,14 @@ bs_upload(char *buf, int len)
     }
 
     BOOT_LOG_DBG("Writing at 0x%x until 0x%x", curr_off, curr_off + (uint32_t)img_chunk_len);
+#ifdef __ZEPHYR__
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+    /* Flashing in progress: very fast blink, like the
+     * STATE_WRITING_STARTED indicator of Adafruit_nRF52_Bootloader
+     * and tinyuf2. */
+    io_led_blink(IO_LED_BLINK_WRITE_CYCLE_MS);
+#endif
+#endif
     /* Write flash aligned chunk, note that img_chunk_len now holds aligned length */
 #if defined(MCUBOOT_SERIAL_UNALIGNED_BUFFER_SIZE) && MCUBOOT_SERIAL_UNALIGNED_BUFFER_SIZE > 0
     if (flash_area_align(fap) > 1 &&

@@ -25,6 +25,9 @@
 #endif
 
 #include "bootutil/bootutil_log.h"
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+#include "io/io.h"
+#endif
 #include "usbd_boot.h"
 
 BOOT_LOG_MODULE_REGISTER(usbd_boot);
@@ -101,6 +104,21 @@ static void boot_usbd_msg_cb(struct usbd_context *const ctx,
 	    msg->type == USBD_MSG_CDC_ACM_CONTROL_LINE_STATE) {
 		k_sem_give(&boot_cdc_acm_ready);
 	}
+
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+	/* Mirror tinyuf2's mount/unmount indication: once the host sets a
+	 * configuration (the UF2 drive is mounted and ready) breathe slowly;
+	 * when the device is unconfigured (msg->status == 0) or the bus
+	 * suspends (cable unplugged / host asleep) go back to the fast
+	 * "waiting for firmware" fade. A flash write (uf2_disk.c) always
+	 * overrides with the very fast write blink. */
+	if (msg->type == USBD_MSG_CONFIGURATION) {
+		io_led_blink(msg->status > 0 ? IO_LED_BLINK_IDLE_CYCLE_MS
+					     : IO_LED_BLINK_WAIT_CYCLE_MS);
+	} else if (msg->type == USBD_MSG_SUSPEND) {
+		io_led_blink(IO_LED_BLINK_WAIT_CYCLE_MS);
+	}
+#endif
 }
 
 /* Register every enabled update class into the USB configuration for

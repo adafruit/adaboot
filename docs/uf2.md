@@ -247,7 +247,7 @@ choose between.
 
 1. Enter the bootloader update mode (GPIO button, double-tap, boot-mode
    request, or no application present).
-2. A USB drive named **UF2 BOOT** appears on your computer.
+2. A USB drive named **ADABOOT** appears on your computer.
 3. Copy the `.uf2` file to the drive.
 4. The device automatically reboots into the new firmware.
 

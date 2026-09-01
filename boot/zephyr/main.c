@@ -218,7 +218,8 @@ static void boot_update_enter(void)
     int rc;
 
 #ifdef CONFIG_MCUBOOT_INDICATION_LED
-    io_led_set(1);
+    /* Fast fade while waiting for firmware */
+    io_led_blink(IO_LED_BLINK_WAIT_CYCLE_MS);
 #endif
 
     mcuboot_status_change(MCUBOOT_STATUS_SERIAL_DFU_ENTERED);
@@ -263,6 +264,11 @@ static void boot_update_enter(void)
 
     BOOT_LOG_INF("UF2 transfer complete");
 
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+    /* Solid LED while rebooting, like tinyuf2's STATE_WRITING_FINISHED. */
+    io_led_set(1);
+#endif
+
     uf2_disk_close();
 
 #ifndef CONFIG_SINGLE_APPLICATION_SLOT
@@ -292,7 +298,8 @@ static void boot_uf2_enter(void)
     int rc;
 
 #ifdef CONFIG_MCUBOOT_INDICATION_LED
-    io_led_set(1);
+    /* Fast fade while waiting for firmware */
+    io_led_blink(IO_LED_BLINK_WAIT_CYCLE_MS);
 #endif
 
     BOOT_LOG_INF("Entering UF2 update mode");
@@ -319,6 +326,11 @@ static void boot_uf2_enter(void)
     }
 
     BOOT_LOG_INF("UF2 transfer complete");
+
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+    /* Solid LED while rebooting, like tinyuf2's STATE_WRITING_FINISHED. */
+    io_led_set(1);
+#endif
 
     uf2_disk_close();
 
@@ -352,7 +364,8 @@ static void boot_serial_enter(int inactivity_in_ms)
     int rc;
 
 #ifdef CONFIG_MCUBOOT_INDICATION_LED
-    io_led_set(1);
+    /* Fast fade while waiting for firmware */
+    io_led_blink(IO_LED_BLINK_WAIT_CYCLE_MS);
 #endif
 
     mcuboot_status_change(MCUBOOT_STATUS_SERIAL_DFU_ENTERED);
@@ -479,7 +492,8 @@ int main(void)
         usb_dfu_forever = true;
 
 #ifdef CONFIG_MCUBOOT_INDICATION_LED
-        io_led_set(1);
+        /* Fast fade while waiting for firmware */
+        io_led_blink(IO_LED_BLINK_WAIT_CYCLE_MS);
 #endif
 
         mcuboot_status_change(MCUBOOT_STATUS_USB_DFU_ENTERED);
@@ -525,7 +539,8 @@ int main(void)
     uint32_t start = k_uptime_get_32();
 
 #ifdef CONFIG_MCUBOOT_INDICATION_LED
-    io_led_set(1);
+    /* Fast fade while waiting for firmware */
+    io_led_blink(IO_LED_BLINK_WAIT_CYCLE_MS);
 #endif
 #endif
 

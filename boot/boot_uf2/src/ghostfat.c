@@ -131,7 +131,7 @@ static void build_boot_sector(uint8_t *buf)
 	write_u32_le(&buf[39], 0x00420042);
 
 	/* Volume label (11 bytes, space-padded) */
-	memcpy(&buf[43], "UF2 BOOT   ", 11);
+	memcpy(&buf[43], "ADABOOT    ", 11);
 
 	/* File system type */
 	memcpy(&buf[54], "FAT16   ", 8);
@@ -269,7 +269,7 @@ static void build_root_dir_sector(const struct uf2_cfg *cfg, uint8_t *buf,
 	uint32_t index_len = build_index_htm(cfg, index_buf, sizeof(index_buf));
 
 	/* Entry 0: Volume label */
-	build_dir_entry(&buf[0], "UF2 BOOT   ", 0x08, 0, 0);
+	build_dir_entry(&buf[0], "ADABOOT    ", 0x08, 0, 0);
 
 	/* Entry 1: INFO_UF2.TXT */
 	build_dir_entry(&buf[32], "INFO_UF2TXT", 0x01, CLUSTER_INFO_UF2,

@@ -1529,16 +1529,30 @@ def autogen_conf_header(board_key):
     )
 
 
-def sectors_conf_block(max_sectors, layout_kconfig="", nor_page_size=0):
+def sectors_conf_block(max_sectors, layout_kconfig="", nor_page_size=0,
+                       has_slot1=True):
     """The generated Kconfig block pinning a board's slot sector layout,
     written to conf/<key>-autogen.conf."""
+    if has_slot1:
+        reason = (
+            "# BOOT_MAX_IMG_SECTORS sizes the swap-status trailer. AUTO can't derive\n"
+            "# it here: slot1 is on external SPI NOR whose jedec,spi-nor binding has\n"
+            "# no static erase-block-size (SFDP runtime discovery), so the build\n"
+            "# under-counts slot1's sectors. The planner knows the erase sizes, so it\n"
+            "# sets the max sector count directly: max(slot0, slot1).\n"
+        )
+    else:
+        reason = (
+            "# BOOT_MAX_IMG_SECTORS caps the number of sectors per image slot. This\n"
+            "# board has a single-app layout (no slot1, hence no swap trailer), so\n"
+            "# the value simply pins slot0's sector count. Pinning it keeps every\n"
+            "# board's sector geometry explicit and future-proofs a slot1 being\n"
+            "# added later. The planner knows the erase sizes, so it sets the max\n"
+            "# sector count directly from slot0.\n"
+        )
     return (
-        "# BOOT_MAX_IMG_SECTORS sizes the swap-status trailer. AUTO can't derive\n"
-        "# it here: slot1 is on external SPI NOR whose jedec,spi-nor binding has\n"
-        "# no static erase-block-size (SFDP runtime discovery), so the build\n"
-        "# under-counts slot1's sectors. The planner knows the erase sizes, so it\n"
-        "# sets the max sector count directly: max(slot0, slot1).\n"
-        "#\n"
+        reason
+        + "#\n"
         "# CONFIG_BOOT_MAX_IMG_SECTORS_AUTO is not set\n"
         f"CONFIG_BOOT_MAX_IMG_SECTORS={max_sectors}\n"
         + (
@@ -1555,10 +1569,14 @@ def sectors_conf_block(max_sectors, layout_kconfig="", nor_page_size=0):
     )
 
 
-def gen_sectors_conf(board_key, planned, nor_kconfigs=None):
+def gen_sectors_conf(board_key, planned, nor_kconfigs=None, split=None):
     """Write (or remove) conf/<key>-autogen.conf, the generated conf fragment
     that pairs with the optional hand-maintained conf/<key>.conf, setting
     CONFIG_BOOT_MAX_IMG_SECTORS.
+
+    ``split`` carries the shared-flash split layout (SiWx917-style boards whose
+    code partition is split into boot+slot0); when given, the sector count is
+    computed from the split's slot0 instead of ``planned``.
 
     BOOT_MAX_IMG_SECTORS sizes the swap-status trailer; CONFIG_BOOT_MAX_IMG_SECTORS_AUTO
     derives it from each slot's erase-block-size. That works for internal flash (the
@@ -1568,8 +1586,9 @@ def gen_sectors_conf(board_key, planned, nor_kconfigs=None):
     trailer magic -- which can trigger a bogus swap and clobber slot0. The
     planner knows the erase sizes (internal from the DT, external from
     boards.toml's [external_flash].erase_block_size), so it sets the max sector
-    count directly: max(slot0, slot1) sectors. Emitted only when the layout has a
-    slot1 (swap/ram-load); single-app boards have no swap trailer.
+    count directly: max(slot0, slot1) sectors. Single-app boards (no slot1) get
+    the fragment too, pinning slot0's sector count, so every board has the
+    sector geometry explicit.
 
     The same SFDP discovery gap also affects the flash page layout the driver
     reports: NOR drivers with runtime-discovered geometry expose it through a
@@ -1600,6 +1619,12 @@ def gen_sectors_conf(board_key, planned, nor_kconfigs=None):
     slot0_dev = None
     slot1_dev = None
     slot1_erase_size = 0
+    if split is not None:
+        # Shared-flash split layout: boot + slot0 on the split region's erase
+        # page; there is no slot1 by construction.
+        _s0_label, _s0_nodes, _s0_off, s0_size = split["slot0"]
+        slot0_dev = split["dev_label"]
+        max_sectors = s0_size // split["erase"]
     for dev, _total, erase_size, parts, *_rest in planned:
         for label, _node_label, _off, size in parts:
             if label == "image-0" and erase_size:
@@ -1618,9 +1643,9 @@ def gen_sectors_conf(board_key, planned, nor_kconfigs=None):
     layout_kconfig = nor_kconfigs.get(slot1_dev) if slot1_dev != slot0_dev else None
     nor_page_size = slot1_erase_size if layout_kconfig else 0
 
-    if not has_slot1:
-        # Single-app layout (no swap trailer); remove a stale fragment if the
-        # board used to have a slot1.
+    if not max_sectors:
+        # No image slot to size (shouldn't happen for a mcuboot board); remove
+        # a stale fragment if the board used to have a slot1.
         if autogen_path.exists():
             autogen_path.unlink()
             print(f"  Removed stale {autogen_path.relative_to(MODULE_DIR.parent)}")
@@ -1629,7 +1654,8 @@ def gen_sectors_conf(board_key, planned, nor_kconfigs=None):
     SECTORS_CONF_DIR.mkdir(parents=True, exist_ok=True)
     autogen_path.write_text(
         autogen_conf_header(board_key)
-        + sectors_conf_block(max_sectors, layout_kconfig, nor_page_size)
+        + sectors_conf_block(max_sectors, layout_kconfig, nor_page_size,
+                             has_slot1=has_slot1)
     )
     print(
         f"  Wrote {autogen_path.relative_to(MODULE_DIR.parent)} "
@@ -1670,7 +1696,7 @@ def gen_all_sectors_conf():
             continue
         split = plan_code_partition_split(edt, flash_overrides)
         if split is not None:
-            gen_sectors_conf(key, [], nor_page_layout_kconfigs(edt))
+            gen_sectors_conf(key, [], nor_page_layout_kconfigs(edt), split=split)
         else:
             partitions_path = DTS_OUT_DIR / entry["vendor"] / f"{key}-partitions.dtsi"
             glue_path = DTS_OUT_DIR / entry["vendor"] / f"{key}.dtsi"
@@ -1788,8 +1814,8 @@ def fix_alignment(
         partitions_path.write_text(content)
         print(f"  Wrote {partitions_path.relative_to(MODULE_DIR.parent)}")
         ensure_glue_dtsi(board_key, vendor)
-        # Single-app split layout: no slot1, so no swap trailer to size.
-        gen_sectors_conf(board_key, [], nor_page_layout_kconfigs(edt))
+        # Single-app split layout: pin slot0's sector count.
+        gen_sectors_conf(board_key, [], nor_page_layout_kconfigs(edt), split=split)
         return
 
     planned = plan_partitions(

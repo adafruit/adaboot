@@ -35,9 +35,32 @@ extern "C" {
 void io_led_init(void);
 
 /*
- * Sets value of the configured LED.
+ * Sets value of the configured LED (solid on/off). Stops any blink
+ * pattern previously started with io_led_blink().
  */
 void io_led_set(int value);
+
+/* LED blink cycle lengths (ms), mirroring the indicator tempos of
+ * Adafruit_nRF52_Bootloader and tinyuf2:
+ * - idle  : slow breathing, bootloader waiting around
+ *           (STATE_USB_MOUNTED, tinyuf2 board_timer_start(5))
+ * - wait  : fast fade, DFU mode waiting for firmware
+ *           (STATE_USB_UNMOUNTED, tinyuf2 board_timer_start(1))
+ * - write : very fast blink, flash write in progress
+ *           (STATE_WRITING_STARTED, tinyuf2 board_timer_start(25))
+ */
+#define IO_LED_BLINK_IDLE_CYCLE_MS   3000
+#define IO_LED_BLINK_WAIT_CYCLE_MS    300
+#define IO_LED_BLINK_WRITE_CYCLE_MS   100
+
+/*
+ * Starts blinking (fading) the LED with the given cycle length in ms.
+ * The LED breathes with a triangle fade like Adafruit_nRF52_Bootloader's
+ * led_tick(); short cycles read as a fast blink. Repeated calls with the
+ * same cycle length are ignored (the pattern keeps running), so callers
+ * can invoke this on every flash write.
+ */
+void io_led_blink(uint32_t cycle_ms);
 
 /*
  * Checks if GPIO is set in the required way to remain in serial recovery mode

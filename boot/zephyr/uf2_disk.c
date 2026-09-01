@@ -18,6 +18,9 @@
 #include "uf2/uf2_disk.h"
 #include "sysflash/sysflash.h"
 #include "flash_map_backend/flash_map_backend.h"
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+#include "io/io.h"
+#endif
 
 BOOT_LOG_MODULE_REGISTER(uf2_disk);
 
@@ -51,6 +54,13 @@ static int uf2_flash_write(uint32_t offset, const void *data, uint32_t len,
 {
 	const struct flash_area *fap = ctx;
 	uint32_t aligned_len = len;
+
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+	/* Flashing in progress: very fast blink, like the
+	 * STATE_WRITING_STARTED indicator of Adafruit_nRF52_Bootloader
+	 * and tinyuf2. */
+	io_led_blink(IO_LED_BLINK_WRITE_CYCLE_MS);
+#endif
 
 	if (uf2_write_block_size > 1) {
 		uint32_t mask = uf2_write_block_size - 1;
