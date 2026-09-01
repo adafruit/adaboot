@@ -63,6 +63,7 @@
 
 #include <bootutil/image.h>
 #include <bootutil/bootutil.h>
+#include <bootutil/boot_status.h>
 
 #include "boot_serial/boot_serial.h"
 #include "boot_serial_priv.h"
@@ -1279,6 +1280,115 @@ out:
 }
 #endif
 
+#ifdef MCUBOOT_BOOT_MGMT_BOOTLOADER_INFO
+/*
+ * Bootloader information (OS group command ID 8), matching the response
+ * format of Zephyr's os_mgmt "bootloader info" command so a client gets
+ * consistent answers whether it queries the application (which reports via
+ * the BLINFO shared data) or the bootloader's own serial recovery:
+ *
+ *   {}                 -> {"bootloader": "Adaboot"}
+ *   {"query": "mode"}  -> {"mode": <enum mcuboot_mode>}
+ *   {"query": "slot"} -> {"slot": <active slot>}
+ *
+ * The name identifies this fork; Zephyr's application-side handler reports
+ * "MCUboot" for the same query.
+ * The mode values are those of "enum mcuboot_mode" (bootutil/boot_status.h);
+ * the mapping below mirrors boot_record.c so the value reported here matches
+ * the BLINFO_MODE TLV a running application sees.
+ */
+static uint8_t
+bs_bootloader_info_mode(void)
+{
+#if defined(MCUBOOT_SINGLE_APPLICATION_SLOT)
+    return MCUBOOT_MODE_SINGLE_SLOT;
+#elif defined(MCUBOOT_SWAP_USING_SCRATCH)
+    return MCUBOOT_MODE_SWAP_USING_SCRATCH;
+#elif defined(MCUBOOT_OVERWRITE_ONLY)
+    return MCUBOOT_MODE_UPGRADE_ONLY;
+#elif defined(MCUBOOT_SWAP_USING_MOVE)
+    return MCUBOOT_MODE_SWAP_USING_MOVE;
+#elif defined(MCUBOOT_SWAP_USING_OFFSET)
+    return MCUBOOT_MODE_SWAP_USING_OFFSET;
+#elif defined(MCUBOOT_DIRECT_XIP)
+#if defined(MCUBOOT_DIRECT_XIP_REVERT)
+    return MCUBOOT_MODE_DIRECT_XIP_WITH_REVERT;
+#else
+    return MCUBOOT_MODE_DIRECT_XIP;
+#endif
+#elif defined(MCUBOOT_RAM_LOAD)
+    return MCUBOOT_MODE_RAM_LOAD;
+#elif defined(MCUBOOT_FIRMWARE_LOADER)
+    return MCUBOOT_MODE_FIRMWARE_LOADER;
+#elif defined(MCUBOOT_SINGLE_APPLICATION_SLOT_RAM_LOAD)
+    return MCUBOOT_MODE_SINGLE_SLOT_RAM_LOAD;
+#else
+#error "Unknown mcuboot operating mode"
+#endif
+}
+
+static void
+bs_bootloader_info(char *buf, int len)
+{
+    struct zcbor_string query = { 0 };
+    size_t decoded;
+    bool ok;
+
+    zcbor_state_t zsd[4 + CBOR_EXTRA_STATES];
+    zcbor_new_decode_state(zsd, ARRAY_SIZE(zsd), (uint8_t *)buf, len, 1, NULL, 0);
+
+    struct zcbor_map_decode_key_val info_decode[] = {
+        ZCBOR_MAP_DECODE_KEY_DECODER("query", zcbor_tstr_decode, &query),
+    };
+
+    if (zcbor_map_decode_bulk(zsd, info_decode, ARRAY_SIZE(info_decode),
+                              &decoded) != 0) {
+        goto out;
+    }
+
+    zcbor_map_start_encode(cbor_state, 10);
+    if (query.len == 0) {
+        /* No query: introduce the bootloader. */
+        ok = zcbor_tstr_put_lit(cbor_state, "bootloader") &&
+             zcbor_tstr_put_lit(cbor_state, "Adaboot");
+    } else if (query.len == sizeof("mode") - 1 &&
+               memcmp(query.value, "mode", query.len) == 0) {
+        ok = zcbor_tstr_put_lit(cbor_state, "mode") &&
+             zcbor_uint32_put(cbor_state, bs_bootloader_info_mode());
+#ifdef MCUBOOT_DOWNGRADE_PREVENTION
+        ok = ok && zcbor_tstr_put_lit(cbor_state, "no-downgrade") &&
+             zcbor_bool_put(cbor_state, true);
+#endif
+    } else if (query.len == sizeof("slot") - 1 &&
+               memcmp(query.value, "slot", query.len) == 0) {
+        /*
+         * The active slot, with BLINFO_RUNNING_SLOT semantics. Serial
+         * recovery has not chain-loaded an image yet, so this is the slot
+         * the bootloader will boot once the update mode exits. For the
+         * modes supported here (single-slot, overwrite and swap),
+         * execution always starts from the primary slot.
+         */
+        ok = zcbor_tstr_put_lit(cbor_state, "slot") &&
+             zcbor_uint32_put(cbor_state, BOOT_SLOT_PRIMARY);
+    } else {
+        /* Query not recognized. */
+        reset_cbor_state();
+        bs_rc_rsp(MGMT_ERR_ENOTSUP);
+        return;
+    }
+
+    if (ok && zcbor_map_end_encode(cbor_state, 10)) {
+        boot_serial_output();
+        return;
+    }
+
+    reset_cbor_state();
+
+out:
+    bs_rc_rsp(MGMT_ERR_EINVAL);
+}
+#endif
+
 #ifdef MCUBOOT_BOOT_MGMT_MCUMGR_PARAMS
 /*
  * Reports the SMP transport buffer parameters so that clients can negotiate
@@ -1401,6 +1511,11 @@ boot_serial_input(char *buf, int len)
         case NMGR_ID_RESET:
             bs_reset(buf, len);
             break;
+#ifdef MCUBOOT_BOOT_MGMT_BOOTLOADER_INFO
+        case NMGR_ID_BOOTLOADER_INFO:
+            bs_bootloader_info(buf, len);
+            break;
+#endif
 #ifdef MCUBOOT_BOOT_MGMT_MCUMGR_PARAMS
         case NMGR_ID_MCUMGR_PARAMS:
             bs_mcumgr_params(buf, len);

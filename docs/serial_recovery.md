@@ -30,9 +30,15 @@ SMP is a basic transfer encoding for use with the MCUmgr management protocol.
 See the Zephyr [Device Management](https://docs.zephyrproject.org/latest/services/device_mgmt/index.html#device-mgmt) documentation for more information about MCUmgr and SMP.
 
 MCUboot supports the following subset of the MCUmgr commands:
-* echo (OS group)
+* echo (OS group), when ``MCUBOOT_BOOT_MGMT_ECHO`` is enabled (note: this Kconfig
+  option has no default value, so it must be explicitly enabled)
 * reset (OS group)
 * MCUmgr parameters SMP buffer size (OS group), when ``MCUBOOT_BOOT_MGMT_MCUMGR_PARAMS`` is enabled
+* bootloader information (OS group), when ``MCUBOOT_BOOT_MGMT_BOOTLOADER_INFO`` is
+  enabled: an empty request reports the bootloader name ("Adaboot"); a ``mode`` query reports
+  the operating mode as a value of ``enum mcuboot_mode`` (see
+  ``bootutil/boot_status.h``), matching the BLINFO_MODE value an application sees;
+  a ``slot`` query reports the active slot (BLINFO_RUNNING_SLOT semantics)
 * image list (IMG group)
 * image upload (IMG group)
 

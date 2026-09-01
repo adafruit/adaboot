@@ -222,6 +222,20 @@ config BOOT_MGMT_MCUMGR_PARAMS
 	  transport line length, so this option requires BOOT_MAX_LINE_INPUT_LEN to remain at the
 	  standard 128-byte fragment size. buf_count will always be 1.
 
+config BOOT_MGMT_BOOTLOADER_INFO
+	bool "Bootloader information command"
+	help
+	  If enabled, support for the mcumgr OS group "Bootloader information"
+	  command (command ID 8) is added, mirroring the command provided by
+	  Zephyr's SMP server so a client can identify the bootloader either via
+	  the application (which reports through the BLINFO shared data) or
+	  directly through the bootloader's serial recovery and get matching
+	  answers. An empty request reports the bootloader name ("Adaboot");
+	  a "mode" query reports the operating mode as a value of "enum
+	  mcuboot_mode" (bootutil/boot_status.h), matching the BLINFO_MODE TLV;
+	  a "slot" query reports the active slot (BLINFO_RUNNING_SLOT
+	  semantics).
+
 menuconfig ENABLE_MGMT_PERUSER
 	bool "System specific mcumgr commands"
 	help
