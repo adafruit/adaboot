@@ -356,6 +356,16 @@ int boot_read_unprotected_tlv_sizes(const struct flash_area *fap, uint16_t *tlv_
                                     uint16_t *tlv_size_secondary);
 #endif
 int boot_slots_compatible(struct boot_loader_state *state);
+
+/**
+ * Log, at warning level, the flash geometry of one image slot (flash area id,
+ * offset, size, sector count, sector size, write size and whether the device
+ * requires erase) with a per-sector dump at debug level. Used to debug
+ * "Cannot upgrade" failures where the two slots disagree on the amount or
+ * the layout of sectors, e.g. when the slots live on different flash devices.
+ */
+void boot_log_slot_layout(struct boot_loader_state *state, size_t slot);
+
 uint32_t boot_status_internal_off(const struct boot_status *bs, int elem_sz);
 int boot_read_image_header(struct boot_loader_state *state, int slot,
                            struct image_header *out_hdr, struct boot_status *bs);

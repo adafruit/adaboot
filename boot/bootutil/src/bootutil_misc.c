@@ -633,6 +633,38 @@ boot_write_sz(struct boot_loader_state *state)
     return elem_sz;
 }
 
+void
+boot_log_slot_layout(struct boot_loader_state *state, size_t slot)
+{
+    const struct flash_area *fap;
+    size_t num_sectors;
+    size_t i;
+
+    fap = BOOT_IMG_AREA(state, slot);
+    num_sectors = boot_img_num_sectors(state, slot);
+
+    BOOT_LOG_WRN("Slot %u layout: fa_id=%d, dev off=0x%x, size=0x%x, "
+                 "sectors=%d, first_sector_size=0x%x, write_size=%u, "
+                 "erase_required=%d",
+                 (unsigned)slot, flash_area_get_id(fap),
+                 (unsigned)flash_area_get_off(fap),
+                 (unsigned)flash_area_get_size(fap),
+                 (int)num_sectors,
+                 (unsigned)(num_sectors > 0 ?
+                     boot_img_sector_size(state, slot, 0) : 0),
+                 (unsigned)flash_area_align(fap),
+                 device_requires_erase(fap) ? 1 : 0);
+    BOOT_LOG_DBG("Slot %u: BOOT_MAX_IMG_SECTORS=%d", (unsigned)slot,
+                 (int)BOOT_MAX_IMG_SECTORS);
+
+    for (i = 0; i < num_sectors; i++) {
+        BOOT_LOG_DBG("Slot %u sector %u: size=0x%x, image offset=0x%x",
+                     (unsigned)slot, (unsigned)i,
+                     (unsigned)boot_img_sector_size(state, slot, i),
+                     (unsigned)boot_img_sector_off(state, slot, i));
+    }
+}
+
 int
 boot_read_sectors(struct boot_loader_state *state, struct boot_sector_buffer *sectors)
 {

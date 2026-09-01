@@ -1,17 +1,3 @@
 /delete-node/ &code_partition;
 
-&flash0 {
-	partitions {
-		boot_partition: partition@202000 {
-			compatible = "zephyr,mapped-partition";
-			label = "mcuboot";
-			reg = <0x202000 DT_SIZE_K(128)>;
-		};
-
-		slot0_partition: code_partition: partition@222000 {
-			compatible = "zephyr,mapped-partition";
-			label = "image-0";
-			reg = <0x222000 DT_SIZE_K(1880)>;
-		};
-	};
-};
+#include "siwx917_dk2605a-partitions.dtsi"

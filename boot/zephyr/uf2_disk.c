@@ -174,13 +174,17 @@ int uf2_disk_register(void)
 
 	BOOT_LOG_DBG("uf2_disk: register start");
 
-#ifdef CONFIG_SINGLE_APPLICATION_SLOT
-	/* Single slot: write directly to primary */
+	/*
+	 * Adaboot recovery (UF2 drag-and-drop *and* serial recovery) always writes
+	 * the primary slot (slot0) directly -- an overwrite of the running app, no
+	 * swap -- matching what serial recovery does (boot_serial.c opens the
+	 * primary slot when MCUBOOT_SERIAL_DIRECT_IMAGE_UPLOAD is off). The
+	 * bootloader is still built swap-using-offset (slot1 present), so the *app*
+	 * can stage its own OTA into slot1 and mcuboot will swap it in on the next
+	 * boot; recovery never touches slot1, so it doesn't depend on the external
+	 * NOR being initialized in the recovery path.
+	 */
 	area_id = FLASH_AREA_IMAGE_PRIMARY(0);
-#else
-	/* Dual slot: write to secondary, swap later */
-	area_id = FLASH_AREA_IMAGE_SECONDARY(0);
-#endif
 
 	rc = flash_area_open(area_id, &target_fap);
 	if (rc != 0) {

@@ -315,13 +315,18 @@ int boot_slots_compatible(struct boot_loader_state *state)
 
     if (num_sectors_pri != num_sectors_sec &&
         (num_sectors_pri + 1) != num_sectors_sec) {
-        BOOT_LOG_WRN("Cannot upgrade: not a compatible amount of sectors");
-        BOOT_LOG_DBG("slot0 sectors: %d, slot1 sectors: %d, usable sectors: %d",
-                     (int)num_sectors_pri, (int)num_sectors_sec,
-                     (int)(num_sectors_sec - 1));
+        BOOT_LOG_WRN("Cannot upgrade: not a compatible amount of sectors: "
+                     "slot0 has %d, slot1 has %d (allowed: equal or slot1 = "
+                     "slot0 + 1)",
+                     (int)num_sectors_pri, (int)num_sectors_sec);
+        boot_log_slot_layout(state, BOOT_SLOT_PRIMARY);
+        boot_log_slot_layout(state, BOOT_SLOT_SECONDARY);
         return 0;
     } else if (num_sectors_pri > BOOT_MAX_IMG_SECTORS) {
-        BOOT_LOG_WRN("Cannot upgrade: more sectors than allowed");
+        BOOT_LOG_WRN("Cannot upgrade: more sectors than allowed "
+                     "(%d > BOOT_MAX_IMG_SECTORS=%d)",
+                     (int)num_sectors_pri, (int)BOOT_MAX_IMG_SECTORS);
+        boot_log_slot_layout(state, BOOT_SLOT_PRIMARY);
         return 0;
     }
 
@@ -337,7 +342,9 @@ int boot_slots_compatible(struct boot_loader_state *state)
         sector_sz_sec = boot_img_sector_size(state, BOOT_SLOT_SECONDARY, i);
 
         if (sector_sz_pri != sector_sz_sec) {
-            BOOT_LOG_WRN("Cannot upgrade: not same sector layout");
+            BOOT_LOG_WRN("Cannot upgrade: not same sector layout: sector %d: "
+                         "slot0 size=0x%x, slot1 size=0x%x",
+                         (int)i, (unsigned)sector_sz_pri, (unsigned)sector_sz_sec);
             return 0;
         }
     }
@@ -364,7 +371,10 @@ int boot_slots_compatible(struct boot_loader_state *state)
 
     if (num_sectors_pri > num_sectors_sec) {
         if (sector_sz_pri != boot_img_sector_size(state, BOOT_SLOT_PRIMARY, i)) {
-            BOOT_LOG_WRN("Cannot upgrade: not same sector layout");
+            BOOT_LOG_WRN("Cannot upgrade: not same sector layout: slot0 "
+                         "sector %d size=0x%x differs from earlier sectors",
+                         (int)i,
+                         (unsigned)boot_img_sector_size(state, BOOT_SLOT_PRIMARY, i));
             return 0;
         }
     }
