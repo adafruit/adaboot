@@ -220,10 +220,10 @@ static uint32_t build_info_uf2_txt(const struct uf2_cfg *cfg, uint8_t *buf,
 	int len;
 
 	len = snprintf((char *)buf, max_len,
-		       "UF2 Bootloader v1.0.0\r\n"
+		       "UF2 Bootloader %s\r\n"
 		       "Model: %s\r\n"
 		       "Board-ID: %s\r\n",
-		       name, name);
+		       UF2_VERSION_STRING, name, name);
 
 	if (len < 0 || (uint32_t)len >= max_len) {
 		return max_len - 1;

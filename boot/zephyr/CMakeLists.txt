@@ -310,6 +310,47 @@ if(CONFIG_MCUBOOT_UF2)
   zephyr_include_directories(
     ${BOOT_DIR}/boot_uf2/include
   )
+
+  # Version string reported in INFO_UF2.TXT on the ghostfat filesystem:
+  # the MCUboot version from the VERSION file plus the git commit the
+  # bootloader was built from (and a -dirty suffix for a modified tree).
+  set(uf2_VERSION_MAJOR 0)
+  set(uf2_VERSION_MINOR 0)
+  set(uf2_PATCHLEVEL 0)
+  foreach(field VERSION_MAJOR VERSION_MINOR PATCHLEVEL)
+    file(STRINGS ${CMAKE_CURRENT_LIST_DIR}/VERSION uf2_${field}
+         REGEX "^[ ]*${field}[ ]*=[ ]*[0-9]+")
+    if(uf2_${field})
+      string(REGEX REPLACE ".*=[ ]*([0-9]+)" "\\1" uf2_${field} "${uf2_${field}}")
+    endif()
+  endforeach()
+  set(uf2_version
+      "v${uf2_VERSION_MAJOR}.${uf2_VERSION_MINOR}.${uf2_PATCHLEVEL}")
+
+  execute_process(
+    COMMAND git rev-parse --short=8 HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    OUTPUT_VARIABLE uf2_git_commit
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE uf2_git_result
+  )
+  if(uf2_git_result EQUAL 0 AND uf2_git_commit)
+    string(APPEND uf2_version "+g${uf2_git_commit}")
+    execute_process(
+      COMMAND git diff --quiet --no-ext-diff HEAD
+      WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+      RESULT_VARIABLE uf2_git_dirty
+      ERROR_QUIET
+    )
+    if(NOT uf2_git_dirty EQUAL 0)
+      string(APPEND uf2_version "-dirty")
+    endif()
+  endif()
+
+  zephyr_compile_definitions(
+    UF2_VERSION_STRING="${uf2_version}"
+  )
 endif()
 
 if(CONFIG_MCUBOOT_UF2 OR CONFIG_BOOT_SERIAL_CDC_ACM)
