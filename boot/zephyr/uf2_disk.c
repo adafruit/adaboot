@@ -34,26 +34,42 @@ static struct {
 } uf2_state_buf;
 
 static struct uf2_cfg uf2_cfg;
-static const struct flash_area *target_fap;
 static bool disk_registered;
 
-/* Write-block size of the target flash device. UF2 payloads are 256 bytes,
- * but the last block of an image can be a shorter partial. Some flash drivers
- * (e.g. Nordic RRAM) require both the write offset and length to be a
- * multiple of the device's write-block size, so we round a partial payload up
- * to that alignment. The UF2 block's data field is zero-padded past
- * payload_size, so the extra bytes read as 0 and land in the image's trailing
- * padding inside the slot (harmless: they are overwritten when a real app
- * is later loaded). 1 means "any length/offset accepted" (the no-op case).
+/* Writable flash regions (partitions). Region 0 is always the primary
+ * application slot; optional regions (storage/filesystem partition, the
+ * MCUboot partition itself) are appended per Kconfig. UF2 blocks are
+ * routed by absolute target address to the containing region.
  */
-static size_t uf2_write_block_size = 1;
+struct uf2_disk_region {
+	const struct flash_area *fap;
+	size_t write_block_size;
+	uint32_t bytes_written;
+};
 
-/* Flash callbacks for write/erase (target slot via flash_area) */
+static struct uf2_disk_region disk_regions[UF2_MAX_REGIONS];
+static struct uf2_region uf2_regions[UF2_MAX_REGIONS];
+static uint8_t num_disk_regions;
+
+static struct uf2_disk_region *uf2_disk_region_of(const struct flash_area *fap)
+{
+	for (uint8_t i = 0; i < num_disk_regions; i++) {
+		if (disk_regions[i].fap == fap) {
+			return &disk_regions[i];
+		}
+	}
+
+	return NULL;
+}
+
+/* Flash callbacks for write/erase (per-region flash_area as ctx) */
 static int uf2_flash_write(uint32_t offset, const void *data, uint32_t len,
 			   void *ctx)
 {
 	const struct flash_area *fap = ctx;
+	struct uf2_disk_region *r = uf2_disk_region_of(fap);
 	uint32_t aligned_len = len;
+	int rc;
 
 #ifdef CONFIG_MCUBOOT_INDICATION_LED
 	/* Flashing in progress: very fast blink, like the
@@ -62,8 +78,18 @@ static int uf2_flash_write(uint32_t offset, const void *data, uint32_t len,
 	io_led_blink(IO_LED_BLINK_WRITE_CYCLE_MS);
 #endif
 
-	if (uf2_write_block_size > 1) {
-		uint32_t mask = uf2_write_block_size - 1;
+	/* UF2 payloads are 256 bytes, but the last block of a file can be a
+	 * shorter partial. Some flash drivers (e.g. Nordic RRAM) require both
+	 * the write offset and length to be a multiple of the device's
+	 * write-block size, so we round a partial payload up to that
+	 * alignment. The UF2 block's data field is zero-padded past
+	 * payload_size, so the extra bytes read as 0 and land in the file's
+	 * trailing padding inside the region (harmless: they are overwritten
+	 * when real content is later loaded). 1 means "any length/offset
+	 * accepted" (the no-op case).
+	 */
+	if (r != NULL && r->write_block_size > 1) {
+		uint32_t mask = r->write_block_size - 1;
 
 		aligned_len = (aligned_len + mask) & ~mask;
 		/* Never write past the end of the flash area. */
@@ -72,7 +98,12 @@ static int uf2_flash_write(uint32_t offset, const void *data, uint32_t len,
 		}
 	}
 
-	return flash_area_write(fap, offset, data, aligned_len);
+	rc = flash_area_write(fap, offset, data, aligned_len);
+	if (rc == 0 && r != NULL) {
+		r->bytes_written += len;
+	}
+
+	return rc;
 }
 
 static int uf2_flash_erase(uint32_t offset, uint32_t len, void *ctx)
@@ -177,10 +208,75 @@ static struct disk_info uf2_disk_info = {
 	.ops = &uf2_disk_ops,
 };
 
+static void uf2_disk_close_regions(void)
+{
+	for (uint8_t i = 0; i < num_disk_regions; i++) {
+		if (disk_regions[i].fap != NULL) {
+			flash_area_close(disk_regions[i].fap);
+			disk_regions[i].fap = NULL;
+		}
+	}
+	num_disk_regions = 0;
+}
+
+/**
+ * Add a flash area to the writable region table. Optional areas may
+ * fail to open (e.g. on a different flash device); callers log and move
+ * on. Returns 0 or a negative errno.
+ */
+static int uf2_disk_add_region(int area_id)
+{
+	const struct flash_area *fap;
+	const struct device *flash_dev;
+	const struct flash_parameters *params;
+	size_t write_block_size = 1;
+	uint8_t idx;
+	int rc;
+
+	if (num_disk_regions >= UF2_MAX_REGIONS) {
+		BOOT_LOG_WRN("UF2: region table full, flash area %d "
+			     "not writable", area_id);
+		return -ENOSPC;
+	}
+
+	rc = flash_area_open(area_id, &fap);
+	if (rc != 0) {
+		return rc;
+	}
+
+	/* Determine the region's flash device write-block size. UF2 payloads
+	 * are 256 bytes but the last block of a file can be a shorter
+	 * partial; see uf2_flash_write() for why we may need to round up.
+	 */
+	flash_dev = flash_area_get_device(fap);
+	if (flash_dev != NULL) {
+		params = flash_get_parameters(flash_dev);
+		if (params != NULL) {
+			write_block_size = params->write_block_size;
+		}
+	}
+
+	idx = num_disk_regions++;
+	disk_regions[idx].fap = fap;
+	disk_regions[idx].write_block_size = write_block_size;
+	disk_regions[idx].bytes_written = 0;
+
+	uf2_regions[idx].base = fap->fa_off;
+	uf2_regions[idx].size = fap->fa_size;
+	uf2_regions[idx].ctx = (void *)fap;
+
+	BOOT_LOG_INF("UF2 writable region %u: flash area %d "
+		     "(offset 0x%x, size 0x%x)",
+		     idx, area_id,
+		     (unsigned int)fap->fa_off,
+		     (unsigned int)fap->fa_size);
+
+	return 0;
+}
+
 int uf2_disk_register(void)
 {
 	int rc;
-	int area_id;
 
 	BOOT_LOG_DBG("uf2_disk: register start");
 
@@ -193,48 +289,59 @@ int uf2_disk_register(void)
 	 * can stage its own OTA into slot1 and mcuboot will swap it in on the next
 	 * boot; recovery never touches slot1, so it doesn't depend on the external
 	 * NOR being initialized in the recovery path.
+	 *
+	 * Region 0 is therefore the primary slot. The optional regions below
+	 * make other partitions writable too; blocks are routed to them by
+	 * target address, so dropping e.g. a filesystem image onto the drive
+	 * writes the storage partition instead of the application.
 	 */
-	area_id = FLASH_AREA_IMAGE_PRIMARY(0);
-
-	rc = flash_area_open(area_id, &target_fap);
+	rc = uf2_disk_add_region(FLASH_AREA_IMAGE_PRIMARY(0));
 	if (rc != 0) {
-		BOOT_LOG_ERR("Failed to open flash area %d: %d", area_id, rc);
+		BOOT_LOG_ERR("Failed to open primary slot for UF2: %d", rc);
 		return rc;
 	}
+
+#if defined(CONFIG_MCUBOOT_UF2_WRITABLE_STORAGE)
+#if PARTITION_EXISTS(storage_partition)
+	/* Filesystem (storage) partition: lets users drag a filesystem image
+	 * (or wipe the filesystem) via UF2 in addition to firmware. Blocks
+	 * addressed inside the partition are erased and written there;
+	 * everything else is untouched. */
+	rc = uf2_disk_add_region(PARTITION_ID(storage_partition));
+	if (rc != 0) {
+		BOOT_LOG_WRN("Storage partition not writable via UF2: %d", rc);
+	}
+#else
+	BOOT_LOG_WRN("MCUBOOT_UF2_WRITABLE_STORAGE set but devicetree has no "
+		     "partition labeled 'storage_partition'");
+#endif
+#endif
+
+#if defined(CONFIG_MCUBOOT_UF2_WRITABLE_BOOTLOADER)
+#if PARTITION_EXISTS(mcuboot)
+	/* MCUboot's own partition. Off by default: the bootloader is actively
+	 * executing while UF2 mode is active. Only enable where the SoC can
+	 * write flash while executing from it; it makes CURRENT.UF2 readbacks
+	 * fully restorable by drag-and-drop. */
+	rc = uf2_disk_add_region(PARTITION_ID(mcuboot));
+	if (rc != 0) {
+		BOOT_LOG_WRN("Bootloader partition not writable via UF2: %d", rc);
+	}
+#else
+	BOOT_LOG_WRN("MCUBOOT_UF2_WRITABLE_BOOTLOADER set but devicetree has "
+		     "no partition labeled 'mcuboot'");
+#endif
+#endif
 
 	/* Configure UF2 processing */
 	uf2_cfg.write = uf2_flash_write;
 	uf2_cfg.erase = uf2_flash_erase;
-	uf2_cfg.cb_ctx = (void *)target_fap;
-	uf2_cfg.flash_base = target_fap->fa_off;
-	uf2_cfg.flash_size = target_fap->fa_size;
+	uf2_cfg.cb_ctx = NULL;
+	uf2_cfg.regions = uf2_regions;
+	uf2_cfg.num_regions = num_disk_regions;
 	uf2_cfg.family_id = CONFIG_MCUBOOT_UF2_FAMILY_ID;
 	uf2_cfg.board_id = CONFIG_MCUBOOT_UF2_BOARD_ID;
 
-	/* Use the flash device's erase block size.
-	 * Default to 4096 if we can't determine it.
-	 */
-	const struct device *flash_dev = flash_area_get_device(target_fap);
-
-	if (flash_dev != NULL) {
-		const struct flash_parameters *params =
-			flash_get_parameters(flash_dev);
-		if (params != NULL) {
-			if (params->erase_value != 0xFF) {
-				/* Some devices might not have standard erase */
-			}
-			/* UF2 payloads are 256 bytes but the last block of an
-			 * image can be a shorter partial; round writes up to the
-			 * device's write-block size so drivers that require
-			 * aligned writes (e.g. Nordic RRAM, which rejects a
-			 * 168-byte trailing payload with -EINVAL) accept it.
-			 * The UF2 block's data field is zero-padded past
-			 * payload_size, so the extra bytes land in the image's
-			 * trailing padding inside the slot.
-			 */
-			uf2_write_block_size = params->write_block_size;
-		}
-	}
 	/* Use a safe default erase size */
 	uf2_cfg.erase_size = 4096;
 
@@ -245,30 +352,22 @@ int uf2_disk_register(void)
 	 * offset 0 through the end of the primary slot. This captures
 	 * the bootloader and the current application image.
 	 */
-	if (flash_dev != NULL) {
-		const struct flash_area *primary_fap;
+	{
+		const struct flash_area *primary_fap = disk_regions[0].fap;
+		uintptr_t flash_base_addr;
 
-		rc = flash_area_open(FLASH_AREA_IMAGE_PRIMARY(0),
-				     &primary_fap);
-		if (rc == 0) {
-			uintptr_t flash_base_addr;
+		flash_device_base(flash_area_get_device_id(primary_fap),
+				  &flash_base_addr);
 
-			flash_device_base(flash_area_get_device_id(primary_fap),
-					  &flash_base_addr);
+		uf2_cfg.read = uf2_flash_read;
+		uf2_cfg.read_ctx = (void *)flash_area_get_device(primary_fap);
+		uf2_cfg.readback_base = (uint32_t)flash_base_addr;
+		uf2_cfg.readback_size = primary_fap->fa_off +
+					primary_fap->fa_size;
 
-			uf2_cfg.read = uf2_flash_read;
-			uf2_cfg.read_ctx = (void *)flash_dev;
-			uf2_cfg.readback_base = (uint32_t)flash_base_addr;
-			uf2_cfg.readback_size = primary_fap->fa_off +
-						primary_fap->fa_size;
-
-			flash_area_close(primary_fap);
-
-			BOOT_LOG_INF("CURRENT.UF2 readback: base 0x%x, "
-				     "size 0x%x",
-				     (unsigned int)uf2_cfg.readback_base,
-				     (unsigned int)uf2_cfg.readback_size);
-		}
+		BOOT_LOG_INF("CURRENT.UF2 readback: base 0x%x, size 0x%x",
+			     (unsigned int)uf2_cfg.readback_base,
+			     (unsigned int)uf2_cfg.readback_size);
 	}
 
 	/* Initialize UF2 state */
@@ -278,19 +377,21 @@ int uf2_disk_register(void)
 	rc = disk_access_register(&uf2_disk_info);
 	if (rc != 0) {
 		BOOT_LOG_ERR("Failed to register UF2 disk: %d", rc);
-		flash_area_close(target_fap);
+		uf2_disk_close_regions();
 		return rc;
 	}
 
 	disk_registered = true;
 
-	BOOT_LOG_INF("UF2 disk registered, target flash area %d "
-		     "(offset 0x%x, size 0x%x)",
-		     area_id,
-		     (unsigned int)target_fap->fa_off,
-		     (unsigned int)target_fap->fa_size);
+	BOOT_LOG_INF("UF2 disk registered, %u writable region(s)",
+		     num_disk_regions);
 
 	return 0;
+}
+
+bool uf2_disk_primary_written(void)
+{
+	return num_disk_regions > 0 && disk_regions[0].bytes_written > 0;
 }
 
 bool uf2_disk_is_complete(void)
@@ -308,8 +409,5 @@ void uf2_disk_close(void)
 	disk_access_unregister(&uf2_disk_info);
 	disk_registered = false;
 
-	if (target_fap != NULL) {
-		flash_area_close(target_fap);
-		target_fap = NULL;
-	}
+	uf2_disk_close_regions();
 }

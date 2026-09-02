@@ -269,13 +269,23 @@ static void boot_update_enter(void)
     io_led_set(1);
 #endif
 
+    /* Note which regions received data before closing: only a transfer
+     * that wrote the primary (application) slot triggers a swap on
+     * reboot; a transfer targeting only another partition (e.g. the
+     * storage/filesystem partition) must not. */
+#ifndef CONFIG_SINGLE_APPLICATION_SLOT
+    bool app_written = uf2_disk_primary_written();
+#endif
+
     uf2_disk_close();
 
 #ifndef CONFIG_SINGLE_APPLICATION_SLOT
     /* Dual slot: mark secondary image as pending for swap */
-    rc = boot_set_pending(0);
-    if (rc != 0) {
-        BOOT_LOG_ERR("Failed to set pending flag: %d", rc);
+    if (app_written) {
+        rc = boot_set_pending(0);
+        if (rc != 0) {
+            BOOT_LOG_ERR("Failed to set pending flag: %d", rc);
+        }
     }
 #endif
 
@@ -332,13 +342,21 @@ static void boot_uf2_enter(void)
     io_led_set(1);
 #endif
 
+    /* Only run application-swap bookkeeping if the primary slot was
+     * written; see boot_update_enter() above. */
+#ifndef CONFIG_SINGLE_APPLICATION_SLOT
+    bool app_written = uf2_disk_primary_written();
+#endif
+
     uf2_disk_close();
 
 #ifndef CONFIG_SINGLE_APPLICATION_SLOT
     /* Dual slot: mark secondary image as pending for swap */
-    rc = boot_set_pending(0);
-    if (rc != 0) {
-        BOOT_LOG_ERR("Failed to set pending flag: %d", rc);
+    if (app_written) {
+        rc = boot_set_pending(0);
+        if (rc != 0) {
+            BOOT_LOG_ERR("Failed to set pending flag: %d", rc);
+        }
     }
 #endif
 

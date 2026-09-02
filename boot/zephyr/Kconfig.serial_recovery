@@ -199,12 +199,16 @@ config BOOT_SERIAL_UART_RX_BATCH_SIZE
 
 config BOOT_ERASE_PROGRESSIVELY
 	bool "Erase flash progressively when receiving new firmware"
-	default y if SOC_FAMILY_NORDIC_NRF || SOC_FAMILY_NXP_IMXRT
+	default y
 	help
 	 If enabled, flash is erased as necessary when receiving new firmware,
 	 instead of erasing the whole image slot at once. This is necessary
 	 on some hardware that has long erase times, to prevent long wait
 	 times at the beginning of the DFU process.
+
+	 This bootloader always erases progressively during SMP serial
+	 recovery uploads: erasing the entire image slot up front stalls the
+	 start of the transfer for as long as a full-slot erase takes.
 
 config BOOT_MGMT_ECHO
 	bool "Echo command"

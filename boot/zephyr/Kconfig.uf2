@@ -90,6 +90,35 @@ config MCUBOOT_UF2_MAX_BLOCKS
 	  Each block carries 256 bytes, so 4096 blocks = 1 MB.
 	  The block tracking bitmap uses MAX_BLOCKS/8 bytes of RAM.
 
+menu "Writable partitions"
+
+config MCUBOOT_UF2_WRITABLE_STORAGE
+	bool "Allow UF2 writes to the storage (filesystem) partition"
+	default y
+	help
+	  If y, UF2 blocks whose target address falls inside the fixed
+	  partition labeled "storage_partition" (e.g. a LittleFS or FAT
+	  filesystem) are erased and written there, alongside the primary
+	  application slot. This lets a filesystem image be deployed (or the
+	  filesystem wiped) by drag-and-drop; blocks targeting the
+	  application slot keep updating firmware as usual. The partition is
+	  erased progressively as its blocks arrive, so unwritten partitions
+	  are untouched. Requires a fixed-partition labeled
+	  "storage_partition" in the devicetree; otherwise a warning is
+	  logged and the feature is inactive.
+
+config MCUBOOT_UF2_WRITABLE_BOOTLOADER
+	bool "Allow UF2 writes to the MCUboot partition (dangerous)"
+	default n
+	help
+	  If y, UF2 blocks targeting the MCUboot partition (fixed partition
+	  labeled "mcuboot") are written there. MCUboot is actively executing
+	  while UF2 mode is active, so this is only safe on SoCs that can
+	  write flash while executing from it. It makes CURRENT.UF2 readbacks
+	  (which include the bootloader) fully restorable by drag-and-drop.
+
+endmenu
+
 config MCUBOOT_UF2_VALIDATE_AFTER_WRITE
 	bool "Validate image header after UF2 write completes"
 	default y

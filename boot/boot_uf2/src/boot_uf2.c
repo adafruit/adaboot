@@ -12,36 +12,86 @@ void uf2_init(struct uf2_state *state, uint32_t max_blocks)
 	memset(state, 0, sizeof(*state) + (max_blocks + 7) / 8);
 }
 
-/**
- * Progressively erase flash from the current erase frontier up to (and
- * including) the sector that contains @p end_offset. This avoids erasing
- * the entire slot up front, which can cause long pauses on flash with
- * slow erase times.
+/* Region accessors. In multi-region mode (regions != NULL) they index the
+ * region table; in legacy single-region mode there is exactly one region
+ * described by flash_base/flash_size with ctx cb_ctx.
  */
-static int erase_up_to(const struct uf2_cfg *cfg, struct uf2_state *state,
-		       uint32_t end_offset)
+static inline uint8_t uf2_num_regions(const struct uf2_cfg *cfg)
 {
-	int rc;
+	return (cfg->regions != NULL && cfg->num_regions > 0)
+		       ? cfg->num_regions : 1;
+}
 
-	/* Round end_offset up to the next erase-block boundary */
-	uint32_t erase_end = ((end_offset / cfg->erase_size) + 1) * cfg->erase_size;
+static inline uint32_t uf2_region_base(const struct uf2_cfg *cfg, uint8_t idx)
+{
+	return (cfg->regions != NULL && cfg->num_regions > 0)
+		       ? cfg->regions[idx].base : cfg->flash_base;
+}
 
-	if (erase_end > cfg->flash_size) {
-		erase_end = cfg->flash_size;
+static inline uint32_t uf2_region_size(const struct uf2_cfg *cfg, uint8_t idx)
+{
+	return (cfg->regions != NULL && cfg->num_regions > 0)
+		       ? cfg->regions[idx].size : cfg->flash_size;
+}
+
+static inline void *uf2_region_ctx(const struct uf2_cfg *cfg, uint8_t idx)
+{
+	return (cfg->regions != NULL && cfg->num_regions > 0)
+		       ? cfg->regions[idx].ctx : cfg->cb_ctx;
+}
+
+/**
+ * Find the writable region containing an absolute flash address.
+ *
+ * @return Region index, or -1 if the address falls outside every region.
+ */
+static int uf2_find_region(const struct uf2_cfg *cfg, uint32_t addr)
+{
+	uint8_t num_regions = uf2_num_regions(cfg);
+
+	for (uint8_t i = 0; i < num_regions; i++) {
+		if (addr >= uf2_region_base(cfg, i) &&
+		    addr < uf2_region_base(cfg, i) + uf2_region_size(cfg, i)) {
+			return i;
+		}
 	}
 
-	while (state->erase_frontier < erase_end) {
+	return -1;
+}
+
+/**
+ * Progressively erase region @p region from its current erase frontier up
+ * to (and including) the sector that contains @p end_offset. This avoids
+ * erasing the entire region up front, which can cause long pauses on flash
+ * with slow erase times, and keeps unwritten regions untouched.
+ */
+static int erase_up_to(const struct uf2_cfg *cfg, struct uf2_state *state,
+		       uint8_t region, uint32_t end_offset)
+{
+	int rc;
+	uint32_t region_size = uf2_region_size(cfg, region);
+	uint32_t *frontier = &state->erase_frontier[region];
+
+	/* Round end_offset up to the next erase-block boundary */
+	uint32_t erase_end =
+		((end_offset / cfg->erase_size) + 1) * cfg->erase_size;
+
+	if (erase_end > region_size) {
+		erase_end = region_size;
+	}
+
+	while (*frontier < erase_end) {
 		uint32_t len = cfg->erase_size;
 
-		if (state->erase_frontier + len > cfg->flash_size) {
-			len = cfg->flash_size - state->erase_frontier;
+		if (*frontier + len > region_size) {
+			len = region_size - *frontier;
 		}
 
-		rc = cfg->erase(state->erase_frontier, len, cfg->cb_ctx);
+		rc = cfg->erase(*frontier, len, uf2_region_ctx(cfg, region));
 		if (rc != 0) {
 			return rc;
 		}
-		state->erase_frontier += len;
+		*frontier += len;
 	}
 
 	return 0;
@@ -57,6 +107,11 @@ int uf2_process_block(const struct uf2_cfg *cfg, struct uf2_state *state,
 	    block->magic_start1 != UF2_MAGIC_START1 ||
 	    block->magic_end != UF2_MAGIC_END) {
 		return -1; /* Not a UF2 block, silently ignore */
+	}
+
+	/* Defensive: the region table must fit the state's frontier array */
+	if (cfg->regions != NULL && cfg->num_regions > UF2_MAX_REGIONS) {
+		return -1;
 	}
 
 	/* Check family ID if configured */
@@ -131,14 +186,16 @@ int uf2_process_block(const struct uf2_cfg *cfg, struct uf2_state *state,
 		return -1;
 	}
 
-	/* Compute the target offset within the flash area */
-	if (block->target_addr < cfg->flash_base) {
-		return -1;
+	/* Route the block's absolute target address to a writable region */
+	int region = uf2_find_region(cfg, block->target_addr);
+
+	if (region < 0) {
+		return -1; /* Outside every writable region */
 	}
 
-	uint32_t offset = block->target_addr - cfg->flash_base;
+	uint32_t offset = block->target_addr - uf2_region_base(cfg, region);
 
-	if (offset + block->payload_size > cfg->flash_size) {
+	if (offset + block->payload_size > uf2_region_size(cfg, region)) {
 		return -1;
 	}
 
@@ -158,13 +215,15 @@ int uf2_process_block(const struct uf2_cfg *cfg, struct uf2_state *state,
 	}
 
 	/* Progressive erase: ensure flash is erased up to this write */
-	rc = erase_up_to(cfg, state, offset + block->payload_size);
+	rc = erase_up_to(cfg, state, (uint8_t)region,
+			 offset + block->payload_size);
 	if (rc != 0) {
 		return rc;
 	}
 
 	/* Write payload to flash */
-	rc = cfg->write(offset, block->data, block->payload_size, cfg->cb_ctx);
+	rc = cfg->write(offset, block->data, block->payload_size,
+			uf2_region_ctx(cfg, (uint8_t)region));
 	if (rc != 0) {
 		return rc;
 	}

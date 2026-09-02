@@ -44,6 +44,20 @@ bool uf2_disk_is_complete(void);
 bool uf2_disk_is_registered(void);
 
 /**
+ * @brief Check if any UF2 data was written to the primary (application)
+ *        slot.
+ *
+ * The completion of a UF2 transfer targeting a non-application region
+ * (e.g. the storage/filesystem partition) must not trigger application
+ * update bookkeeping (image confirmation / swap requests); callers can
+ * use this to distinguish "firmware was updated" from "only another
+ * partition was written".
+ *
+ * @return true if at least one UF2 block was written to the primary slot
+ */
+bool uf2_disk_primary_written(void);
+
+/**
  * @brief Close the flash area and unregister the disk.
  */
 void uf2_disk_close(void);

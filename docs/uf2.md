@@ -88,12 +88,46 @@ The target flash slot is determined by the existing MCUboot slot configuration:
   written directly to the primary slot and the device reboots into the new
   image.
 
-- **Dual slot** (default): The UF2 payload is written to the secondary slot.
-  MCUboot marks the image as pending (``boot_set_pending(0)``) and reboots.
-  The normal MCUboot swap mechanism then applies the update.
+- **Dual slot** (default): The UF2 payload is also written directly to the
+  primary slot (an overwrite of the running app, no swap) and, if the
+  primary slot received data, the update is marked
+  (``boot_set_pending(0)``) before rebooting.
 
 In both cases, the UF2 file must contain a complete, signed MCUboot image
-(header + firmware + TLVs).
+(header + firmware + TLVs) *when targeting the application slot*; other
+writable partitions (see below) take raw partition contents.
+
+## Writing other partitions (filesystem, ...)
+
+Besides the application slot, UF2 blocks can target other flash partitions.
+Blocks are routed by their absolute target address to the partition that
+contains it, so the address you encode in the ``.uf2`` file selects the
+partition:
+
+- the **primary slot** (default target, updated as described above),
+- the **storage/filesystem partition** (``CONFIG_MCUBOOT_UF2_WRITABLE_STORAGE``,
+  enabled by default): drop a LittleFS or FAT filesystem image (or an
+  all-``0xFF`` image to wipe it) using its partition offset as the UF2 base
+  address; and
+- optionally the **MCUboot partition itself**
+  (``CONFIG_MCUBOOT_UF2_WRITABLE_BOOTLOADER``, off by default — see
+  `Can UF2 update the bootloader?`_).
+
+Each region is erased progressively as its own blocks arrive, so a
+filesystem-only transfer leaves the application slot untouched, and
+vice versa. A transfer that only writes a non-application region skips the
+application-update bookkeeping (no image-confirmation/swap request) before
+the reboot.
+
+For example, to deploy a filesystem image living at partition offset
+``0x1f4000``:
+
+``` console
+python3 tools/uf2conv.py -c -b 0x1f4000 -f 0xADA32D -o littlefs.uf2 fsimage.bin
+```
+
+Up to ``UF2_MAX_REGIONS`` (4) partitions are writable; the region table is
+built at boot from the devicetree's fixed partitions.
 
 ## Creating UF2 files
 
@@ -271,11 +305,17 @@ region triggers a flash read and wraps the data into a UF2 block.
 
 ## Can UF2 update the bootloader?
 
-No. The bootloader (MCUboot) is actively executing when UF2 mode is active,
-so it cannot safely overwrite its own code. UF2 updates target the application
-slot(s) only.
+By default, no. The bootloader (MCUboot) is actively executing when UF2 mode
+is active, so it cannot safely overwrite its own code. UF2 updates target the
+application slot(s) and other partitions only.
 
-To update the bootloader itself, use SWD/JTAG or a two-stage bootloader
+If you *need* to flash the bootloader by drag-and-drop (e.g. to make
+``CURRENT.UF2`` readbacks fully restorable), enable
+``CONFIG_MCUBOOT_UF2_WRITABLE_BOOTLOADER``. This is only safe on SoCs that
+can write flash while executing from it (the write happens while the
+bootloader runs from the same partition), so it is off by default.
+
+To update the bootloader safely, use SWD/JTAG or a two-stage bootloader
 design where an immutable first-stage bootloader can update MCUboot.
 
 However, CURRENT.UF2 *does* include the bootloader in its readback, so you

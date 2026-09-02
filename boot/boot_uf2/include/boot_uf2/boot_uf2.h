@@ -29,6 +29,12 @@ extern "C" {
 #define UF2_PAYLOAD_SIZE   256
 #define UF2_DATA_SIZE      476
 
+/* Maximum number of writable flash regions (e.g. partitions) that UF2
+ * blocks can be routed to. Each region keeps its own erase frontier in
+ * struct uf2_state.
+ */
+#define UF2_MAX_REGIONS    4
+
 /*
  * UF2 extension tags (flag UF2_FLAG_EXTENSION_TAGS) carry additional
  * metadata in the data padding right after the payload. Each tag is
@@ -65,6 +71,20 @@ struct uf2_block {
 };
 
 /**
+ * @brief A writable flash region (e.g. a partition)
+ *
+ * When cfg->regions is non-NULL, UF2 blocks are routed by their absolute
+ * target address to the region containing that address. This lets a single
+ * UF2 drive serve several partitions (application slot, filesystem/storage
+ * partition, ...) chosen per block instead of one fixed slot.
+ */
+struct uf2_region {
+	uint32_t base;  /* absolute flash address of the region start */
+	uint32_t size;  /* region size in bytes */
+	void *ctx;      /* opaque context passed to write/erase callbacks */
+};
+
+/**
  * @brief Flash operation callbacks
  */
 typedef int (*uf2_flash_write_cb)(uint32_t offset, const void *data, uint32_t len,
@@ -80,8 +100,21 @@ struct uf2_cfg {
 	uf2_flash_write_cb write;
 	uf2_flash_erase_cb erase;
 	void *cb_ctx;
+	/* Single-region mode (regions == NULL): the only writable region
+	 * spans flash_base .. flash_base + flash_size and all write/erase
+	 * callbacks receive cb_ctx.
+	 */
 	uint32_t flash_base;
 	uint32_t flash_size;
+
+	/* Multi-region mode (regions != NULL with num_regions > 0): UF2
+	 * blocks are routed by absolute target address to the region
+	 * containing the address, and write/erase callbacks receive that
+	 * region's ctx. flash_base/flash_size are ignored in this mode.
+	 */
+	const struct uf2_region *regions;
+	uint8_t num_regions;
+
 	uint32_t family_id;
 	const char *board_id;
 	uint32_t erase_size;
@@ -105,7 +138,9 @@ struct uf2_cfg {
 struct uf2_state {
 	uint32_t num_blocks;
 	uint32_t blocks_received;
-	uint32_t erase_frontier;
+	/* Progressive erase frontier per writable region (index 0 is the
+	 * legacy single region). Region-relative offset. */
+	uint32_t erase_frontier[UF2_MAX_REGIONS];
 	bool     complete;
 	/* Bitmask tracking which blocks have been received.
 	 * Size determined by CONFIG_MCUBOOT_UF2_MAX_BLOCKS / 8.
@@ -125,7 +160,8 @@ void uf2_init(struct uf2_state *state, uint32_t max_blocks);
  * @brief Process a single UF2 block
  *
  * Validates the block, erases flash progressively as needed,
- * and writes the payload to the target flash area.
+ * and writes the payload to the target region (see struct uf2_region
+ * for multi-partition routing).
  *
  * @param cfg   UF2 configuration
  * @param state UF2 processing state
