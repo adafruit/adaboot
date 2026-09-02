@@ -15,8 +15,17 @@ mcuboot reverts on the following boot, restoring the real app to slot0. The
 user then re-flashes (the updater requests serial/UF2 recovery mode anyway).
 
 This module produces that second variant by re-signing the updater's raw
-``zephyr.bin`` with imgtool swap-style arguments (``--slot-size`` = slot1,
-``--align`` = the flash write-block-size) plus ``--pad`` (no ``--confirm``):
+``zephyr.bin`` with imgtool ``--pad`` (no ``--confirm``) and ``--slot-size`` =
+slot1. The signing style follows the *bootloader's* upgrade mode, read from
+the bootloader build's ``.config``:
+
+* Swap mode (the default): swap-style arguments (``--align`` = the flash
+  write-block-size) so the image carries a swap trailer.
+* Overwrite mode (``CONFIG_BOOT_UPGRADE_ONLY=y``): ``--overwrite-only`` and no
+  ``--align``. The bootloader copies slot1 over slot0 without swapping, so no
+  swap alignment is needed -- and some boards' write blocks exceed imgtool's
+  32-byte ``--align`` cap anyway (e.g. the RA8's 128-byte code-flash write
+  block, which is why such boards use overwrite in the first place).
 
     <updater>/zephyr/zephyr.bin  -\u003e  <updater>/zephyr/zephyr.slot1.signed.bin
 
@@ -61,8 +70,12 @@ def _load_edt(updater_dir):
         return pickle.load(f)
 
 
-def _config_value(build_dir, name):
-    """Read a CONFIG_<name> from <build_dir>/zephyr/.config (the merged config)."""
+def _config_value(build_dir, name, required=True):
+    """Read a CONFIG_<name> from <build_dir>/zephyr/.config (the merged config).
+
+    Returns None (instead of aborting) when `required` is false and the symbol
+    is not set.
+    """
     config = pathlib.Path(build_dir) / "zephyr" / ".config"
     if not config.exists():
         raise SystemExit(f"error: {config} not found -- build the updater first.")
@@ -76,7 +89,35 @@ def _config_value(build_dir, name):
             if len(val) >= 2 and val[0] == '"' and val[-1] == '"':
                 val = val[1:-1]
             return val
-    raise SystemExit(f"error: {name} not set in {config}")
+    if required:
+        raise SystemExit(f"error: {name} not set in {config}")
+    return None
+
+
+def _boot_overwrite_mode(boot_dir):
+    """True if the bootloader build upgrades by overwrite, not swap.
+
+    The upgrade mode is a bootloader-only setting: conf/<key>.conf sets
+    CONFIG_BOOT_UPGRADE_ONLY for boards whose write block exceeds MCUboot's
+    supported swap alignment (e.g. ek_ra8d1). BOOT_UPGRADE_ONLY maps to
+    MCUBOOT_OVERWRITE_ONLY in the bootloader, so imgtool must be told the
+    same (``--overwrite-only``, and no ``--align``).
+    """
+    return _config_value(boot_dir, "CONFIG_BOOT_UPGRADE_ONLY", required=False) == "y"
+
+
+def _boot_build_dir(updater_dir, boot_dir=None):
+    """Resolve the bootloader build dir from the updater's (or an explicit arg)."""
+    if boot_dir is not None:
+        return pathlib.Path(boot_dir)
+    name = pathlib.Path(updater_dir).name
+    if name.endswith("-updater"):
+        # The Makefile builds UPDATER ?= $(BUILD)-updater.
+        return pathlib.Path(updater_dir).with_name(name[:-len("-updater")])
+    raise SystemExit(
+        f"error: cannot derive the bootloader build dir from '{updater_dir}' "
+        "(expected it to end in '-updater'); pass it explicitly as a second arg."
+    )
 
 
 def _slot1_size_and_align(edt):
@@ -104,8 +145,10 @@ def _slot1_size_and_align(edt):
     return slot1_size, wbs
 
 
-def cmd_slot1(updater_dir):
+def cmd_slot1(updater_dir, boot_dir=None):
     updater_dir = pathlib.Path(updater_dir)
+    boot_dir = _boot_build_dir(updater_dir, boot_dir)
+    overwrite = _boot_overwrite_mode(boot_dir)
     edt = _load_edt(updater_dir)
     slot1_size, wbs = _slot1_size_and_align(edt)
     if slot1_size is None:
@@ -128,14 +171,29 @@ def cmd_slot1(updater_dir):
         "--version", str(version),
         "--header-size", str(header_size),
         "--slot-size", str(slot1_size),
-        "--align", str(wbs),
+    ]
+    if overwrite:
+        # The bootloader overwrites slot0 with slot1 (no swap), so the image
+        # needs no swap alignment -- skip --align entirely and use the
+        # overwrite-only trailer. (Keeps boards whose write block exceeds
+        # imgtool's 32-byte --align cap, like the RA8's 128, working.)
+        cmd.append("--overwrite-only")
+        print(f"==> Signing slot1 updater variant (overwrite-only, no align) ...")
+    else:
+        cmd += ["--align", str(wbs)]
+        print(f"==> Signing slot1 updater variant (swap, align {wbs}) ...")
+    cmd += [
         "--pad",  # pending trailer: a test upgrade (no --confirm), so mcuboot reverts
         str(raw_bin), str(out_bin),
     ]
-    print(f"==> Signing slot1 updater variant (test upgrade, slot-size {slot1_size}, "
-          f"align {wbs}): {out_bin.name}")
+    print(f"    slot-size {slot1_size}: {out_bin.name}")
     subprocess.run(cmd, check=True)
-    print(f"==> {out_bin}  (upload to slot1 via smpmgr; mcuboot swaps it in, then reverts)")
+    if overwrite:
+        print(f"==> {out_bin}  (upload to slot1 via smpmgr; the overwrite-only "
+              "bootloader copies it over slot0, then the updater runs)")
+    else:
+        print(f"==> {out_bin}  (upload to slot1 via smpmgr; mcuboot swaps it in, "
+              "then reverts)")
     return 0
 
 
@@ -145,9 +203,10 @@ def main(argv):
         return 0
     if argv[1] == "slot1":
         if len(argv) < 3:
-            sys.stderr.write("usage: updater_sign.py slot1 <updater-build-dir>\n")
+            sys.stderr.write(
+                "usage: updater_sign.py slot1 <updater-build-dir> [<bootloader-build-dir>]\n")
             return 2
-        return cmd_slot1(argv[2])
+        return cmd_slot1(argv[2], argv[3] if len(argv) > 3 else None)
     sys.stderr.write(f"error: unknown subcommand '{argv[1]}'; try 'slot1 <updater-build-dir>'\n")
     return 2
 

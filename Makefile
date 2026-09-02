@@ -192,7 +192,11 @@ build:
 #   $(UPDATER)/mcuboot-updater.uf2
 # On swap-capable boards (slot1_partition present) a second variant is signed
 # as a *test* upgrade (imgtool --pad, no --confirm) so it can be uploaded to the
-# secondary slot instead -- mcuboot swaps it in, the updater runs, then reverts:
+# secondary slot instead -- mcuboot swaps it in, the updater runs, then reverts.
+# The signing style follows the bootloader's upgrade mode: swap-style (--align
+# = write-block-size) normally, but --overwrite-only with no --align on
+# BOOT_UPGRADE_ONLY boards (they overwrite slot1 over slot0 instead of
+# swapping, and their write blocks exceed imgtool's 32-byte --align cap):
 #   $(UPDATER)/zephyr/zephyr.slot1.signed.bin
 updater:
 	@if [ -z "$(BOARD)" ]; then echo "Set BOARD=<key>; see 'make list'. Run 'make workspace' first."; false; fi
@@ -205,7 +209,7 @@ updater:
 	  -DEXTRA_DTC_OVERLAY_FILE="$(if $(strip $(UPDATER_OVERLAY)),$(OVERLAY);$(UPDATER_OVERLAY),$(OVERLAY))" \
 	  -DMCUBOOT_IMAGE_BIN=$(ADABOOT_DIR)/$(BUILD)/mcuboot.bin
 	@echo "==> $(UPDATER)/zephyr/zephyr.signed.bin  (slot0: flash directly to self-update)"
-	@python3 $(ADABOOT_DIR)/tools/updater_sign.py slot1 $(UPDATER)
+	@python3 $(ADABOOT_DIR)/tools/updater_sign.py slot1 $(UPDATER) $(BUILD)
 ifneq ($(filter $(BOARD),$(UF2_BOARDS)),)
 # UF2-capable board: also emit a .uf2 of the signed updater.
 #
