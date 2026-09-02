@@ -41,7 +41,6 @@ if ADABOOT_BOARD && BOOTLOADER_MCUBOOT
 
 choice MCUBOOT_MODE
 	default MCUBOOT_MODE_OVERWRITE_ONLY if $(BOARD) = "ek_ra8d1"
-	default MCUBOOT_MODE_RAM_LOAD if $(BOARD) = "nucleo_n657x0_q"
 	default MCUBOOT_MODE_SINGLE_APP
 endchoice
 

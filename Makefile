@@ -70,6 +70,12 @@ BOARD_CONF := $(wildcard $(CONF_DIR)/$(BOARD).conf)
 # `python3 tools/partition_layout.py --fix <key>`; applied after the
 # hand-maintained fragment so the computed geometry wins.
 BOARD_AUTOGEN_CONF := $(wildcard $(CONF_DIR)/$(BOARD)-autogen.conf)
+# Optional updater-specific overlay (dts/<vendor>/<key>-updater.dtsi), empty if
+# absent. Applied after the layout overlay for the updater build only. RAM-load
+# boards use it to link the updater into the chainloaded-application RAM below
+# the bootloader's own (FSBL) RAM region, which the SoC layer (e.g. the N6's
+# ram_check.ld) may assert.
+UPDATER_OVERLAY := $(wildcard $(OVERLAY:.dtsi=-updater.dtsi))
 endif
 
 # Bootloader EXTRA_CONF_FILE:
@@ -213,7 +219,7 @@ updater:
 	@echo "==> Building updater for $(BOARD) (Zephyr board $(WEST_BOARD))"
 	$(WEST) build -b $(WEST_BOARD) -d $(UPDATER) $(ADABOOT_DIR)/samples/bootloader-updater -- \
 	  -DEXTRA_ZEPHYR_MODULES=$(ADABOOT_DIR) \
-	  -DEXTRA_DTC_OVERLAY_FILE=$(OVERLAY) \
+	  -DEXTRA_DTC_OVERLAY_FILE="$(if $(strip $(UPDATER_OVERLAY)),$(OVERLAY);$(UPDATER_OVERLAY),$(OVERLAY))" \
 	  $(UPDATER_CONF_FLAG) \
 	  -DMCUBOOT_IMAGE_BIN=$(ADABOOT_DIR)/$(BUILD)/mcuboot.bin
 	@echo "==> $(UPDATER)/zephyr/zephyr.signed.bin  (slot0: flash directly to self-update)"

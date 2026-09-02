@@ -104,11 +104,12 @@ erase_block_size = 4096
 [boards.nucleo_n657x0_q]
 board = "nucleo_n657x0_q/stm32n657xx"
 vendor = "st"
-# STM32N6 runs from RAM (no XIP), so mcuboot must copy the image to RAM.
-mcuboot_mode = "ram_load"
 
 [boards.nucleo_n657x0_q.external_flash]
-label = "mx25um51245g"
+# XIP code flash: a soc-nv-flash child of the XSPI NOR, mapped into the
+# memory-mapped window (see dts/st/nucleo_n657x0_q.dtsi). Partitions live
+# there so code-partition images link at their memory-mapped addresses.
+label = "xip_flash"
 erase_block_size = 4096
 
 [boards.nucleo_u575zi_q]

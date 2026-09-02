@@ -1,4 +1,45 @@
 /* Delete Zephyr-default partitions before redefining them. */
 &mx25um51245g { /delete-node/ partitions; };
 
+/* XIP code flash: the N6 has no internal flash, so code-partition images
+ * execute in place from the XSPI NOR's memory-mapped window. Mirror the
+ * upstream stm32n6570_dk pattern: a soc-nv-flash child of the XSPI NOR node,
+ * with ranges translating the child's offsets into the memory-mapped base
+ * (xspi2 -> 0x70000000). The partitions dtsi (generated, included below) hangs
+ * the partition layout off this node; the runtime flash driver is still the
+ * parent st,stm32-xspi-nor (flash_map walks up the parent chain to find it).
+ * The node must be defined before the include: label references in the
+ * devicetree are resolved in document order.
+ */
+&mx25um51245g {
+	#address-cells = <1>;
+	#size-cells = <1>;
+	ranges = <0x0 0x70000000 DT_SIZE_M(64)>; /* 512 Mbits */
+
+	xip_flash: xip-flash@0 {
+		compatible = "soc-nv-flash";
+		reg = <0x0 DT_SIZE_M(64)>;
+		write-block-size = <1>;
+		erase-block-size = <DT_SIZE_K(4)>;
+	};
+};
+
 #include "nucleo_n657x0_q-partitions.dtsi"
+
+/* Flash chosen properties needed by both builds:
+ * - zephyr,flash = the XIP flash: the STM32 soc layer derives the linker's
+ *   flash base from its parent (0 for the XSPI NOR) and code-partition images
+ *   link at their memory-mapped addresses; the imgtool signing step
+ *   (deps/zephyr/cmake/mcuboot.cmake) also reads write-block-size from it.
+ * - zephyr,flash-controller mirrors upstream (the XSPI NOR device node).
+ * zephyr,code-partition is deliberately not set here -- boot/zephyr/app.overlay
+ * points it at boot_partition for the bootloader and
+ * samples/bootloader-updater/app.overlay at slot0 for the updater, and this
+ * overlay is applied after those.
+ */
+/ {
+	chosen {
+		zephyr,flash = &xip_flash;
+		zephyr,flash-controller = &mx25um51245g;
+	};
+};

@@ -1,0 +1,14 @@
+/* Updater-specific overlay for nucleo_n657x0_q (XIP board, MCUboot FSBL).
+ *
+ * The bootloader is the ST FSBL: the boot ROM loads it into the FSBL RAM
+ * region at 0x34180400 (axisram2, the board's zephyr,sram). The XIP updater
+ * app keeps its code in the memory-mapped flash (slot0) but its data RAM must
+ * stay below the FSBL region -- the n6 SoC's ram_check.ld asserts a
+ * chain-loaded image's kernel RAM never reaches the bootloader's RAM. Same
+ * data-RAM choice as the upstream stm32n6570_dk default board dts.
+ */
+/ {
+	chosen {
+		zephyr,sram = &axisram1;
+	};
+};

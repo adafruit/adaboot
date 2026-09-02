@@ -160,7 +160,7 @@ def discover_boards():
 # ── Devicetree build + load ───────────────────────────────────────────────
 
 
-def cmake_only_build(board_id, build_dir):
+def cmake_only_build(board_id, build_dir, overlay=None):
     """Run west build --cmake-only to generate the resolved devicetree.
 
     The build only needs the resolved devicetree (``edt.pickle``), so it is run
@@ -169,6 +169,11 @@ def cmake_only_build(board_id, build_dir):
     would require this module to be wired up as a west module and would couple
     layout planning to the bootloader build. The board's own DTS (which is
     where the flash geometry lives) is what produces the edt, not the app.
+
+    The fork's board overlay (dts/<vendor>/<key>.dtsi) is applied when given:
+    some boards move the partitioned flash into a fork-added node (e.g. the
+    nucleo_n657x0_q's XIP soc-nv-flash child of its XSPI NOR), and the layout
+    must be planned against the overlay's flash geometry.
     """
     build_dir.mkdir(parents=True, exist_ok=True)
     sample_dir = ZEPHYR_BASE / "samples" / "hello_world"
@@ -189,6 +194,8 @@ def cmake_only_build(board_id, build_dir):
         "--cmake-only",
         str(sample_dir),
     ]
+    if overlay:
+        cmd += ["--", f"-DEXTRA_DTC_OVERLAY_FILE={overlay}"]
     result = subprocess.run(cmd, cwd=MODULE_DIR, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"Build failed:\n{result.stderr}", file=sys.stderr)
@@ -1268,10 +1275,16 @@ def discover_layouts():
     mirrors the Zephyr board folders, so keys must be unique across vendors.
     Per-board "-partitions.dtsi" files (the generated partition geometry that
     <board>.dtsi includes) are skipped: a board's layout is its main dtsi,
-    which is what gets applied to an image.
+    which is what gets applied to an image. Per-board "-updater.dtsi" files
+    (updater-only chosen/glue overlays, applied after <board>.dtsi by the
+    Makefile) are skipped too: they are not layouts.
     """
     layouts = {}
-    dtsis = (p for p in DTS_OUT_DIR.glob("*/*.dtsi") if not p.stem.endswith("-partitions"))
+    dtsis = (
+        p
+        for p in DTS_OUT_DIR.glob("*/*.dtsi")
+        if not p.stem.endswith("-partitions") and not p.stem.endswith("-updater")
+    )
     for dtsi in sorted(dtsis, key=lambda p: (p.stem, p.parent.name)):
         key = dtsi.stem
         rel = f"{dtsi.parent.name}/{dtsi.name}"
@@ -1930,8 +1943,14 @@ def main():
 
     build_dir = MODULE_DIR / f"build-partitions-{args.board}"
 
+    overlay = None
+    if vendor:
+        overlay = DTS_OUT_DIR / vendor / f"{args.board}.dtsi"
+        if not overlay.exists():
+            overlay = None
+
     print(f"Running cmake-only build for {board_id}...")
-    cmake_only_build(board_id, build_dir)
+    cmake_only_build(board_id, build_dir, overlay=overlay)
 
     edt = load_edt(build_dir)
 

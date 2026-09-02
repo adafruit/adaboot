@@ -9,38 +9,44 @@
  * this file.
  */
 
-&mx25um51245g {
+&xip_flash {
 	partitions {
 		compatible = "fixed-partitions";
 		#address-cells = <1>;
 		#size-cells = <1>;
 
 		boot_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
 			label = "mcuboot";
 			reg = <0x0 DT_SIZE_K(256)>;
 		};
 
 		slot0_partition: partition@40000 {
+			compatible = "zephyr,mapped-partition";
 			label = "image-0";
 			reg = <0x40000 DT_SIZE_M(8)>;
 		};
 
 		slot1_partition: partition@840000 {
+			compatible = "zephyr,mapped-partition";
 			label = "image-1";
 			reg = <0x840000 DT_SIZE_M(8)>;
 		};
 
 		storage_partition: partition@1040000 {
+			compatible = "zephyr,mapped-partition";
 			label = "storage";
 			reg = <0x1040000 DT_SIZE_K(32)>;
 		};
 
 		nvm_partition: partition@1048000 {
+			compatible = "zephyr,mapped-partition";
 			label = "nvm";
 			reg = <0x1048000 DT_SIZE_K(4)>;
 		};
 
 		fatfs_partition: partition@1049000 {
+			compatible = "zephyr,mapped-partition";
 			label = "filesystem";
 			reg = <0x1049000 DT_SIZE_K(48860)>;
 		};

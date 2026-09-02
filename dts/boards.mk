@@ -50,7 +50,6 @@ nrf7002dk_DTSI := dts/nordic/nrf7002dk.dtsi
 
 nucleo_n657x0_q_BOARD := nucleo_n657x0_q/stm32n657xx
 nucleo_n657x0_q_DTSI := dts/st/nucleo_n657x0_q.dtsi
-nucleo_n657x0_q_RAM_LOAD := y
 
 nucleo_u575zi_q_BOARD := nucleo_u575zi_q/stm32u575xx
 nucleo_u575zi_q_DTSI := dts/st/nucleo_u575zi_q.dtsi

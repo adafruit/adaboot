@@ -25,6 +25,7 @@ set(MCUBOOT_LAYOUT_nrf54l15dk "${CMAKE_CURRENT_LIST_DIR}/nordic/nrf54l15dk.dtsi"
 set(MCUBOOT_LAYOUT_nrf54lm20dk "${CMAKE_CURRENT_LIST_DIR}/nordic/nrf54lm20dk.dtsi" CACHE INTERNAL "nrf54lm20dk partition layout")
 set(MCUBOOT_LAYOUT_nrf7002dk "${CMAKE_CURRENT_LIST_DIR}/nordic/nrf7002dk.dtsi" CACHE INTERNAL "nrf7002dk partition layout")
 set(MCUBOOT_LAYOUT_nucleo_n657x0_q "${CMAKE_CURRENT_LIST_DIR}/st/nucleo_n657x0_q.dtsi" CACHE INTERNAL "nucleo_n657x0_q partition layout")
+set(MCUBOOT_LAYOUT_nucleo_n657x0_q-updater "${CMAKE_CURRENT_LIST_DIR}/st/nucleo_n657x0_q-updater.dtsi" CACHE INTERNAL "nucleo_n657x0_q-updater partition layout")
 set(MCUBOOT_LAYOUT_nucleo_u575zi_q "${CMAKE_CURRENT_LIST_DIR}/st/nucleo_u575zi_q.dtsi" CACHE INTERNAL "nucleo_u575zi_q partition layout")
 set(MCUBOOT_LAYOUT_rpi_pico "${CMAKE_CURRENT_LIST_DIR}/raspberrypi/rpi_pico.dtsi" CACHE INTERNAL "rpi_pico partition layout")
 set(MCUBOOT_LAYOUT_rpi_pico2 "${CMAKE_CURRENT_LIST_DIR}/raspberrypi/rpi_pico2.dtsi" CACHE INTERNAL "rpi_pico2 partition layout")
@@ -47,6 +48,7 @@ set(MCUBOOT_LAYOUT_BOARDS
     nrf54lm20dk
     nrf7002dk
     nucleo_n657x0_q
+    nucleo_n657x0_q-updater
     nucleo_u575zi_q
     rpi_pico
     rpi_pico2
