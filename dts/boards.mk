@@ -5,13 +5,11 @@
 # Make fragment consumed by the standalone Makefile. Maps each mcuboot
 # board partition key to its canonical Zephyr board id and layout overlay.
 # The upgrade mode (single_app vs swap-using-offset) is NOT here: it is
-# chosen by Kconfig from the devicetree (slot1 present -> swap). RAM-load
-# is the one mode not derivable from the layout, so it is flagged here.
+# chosen by Kconfig from the devicetree (slot1 present -> swap).
 #
 # MCUBOOT_BOARDS   every partition key that boots via mcuboot
 # <key>_BOARD      canonical Zephyr board id (value passed to `west build -b`)
 # <key>_DTSI       path to the layout overlay (dts/<vendor>/<key>.dtsi)
-# <key>_RAM_LOAD   y if the board boots via RAM-load (else unset)
 
 MCUBOOT_BOARDS := da14695_dk_usb ek_ra6m5 ek_ra8d1 frdm_mcxn947 frdm_rw612 mimxrt1170_evk nrf5340dk nrf54h20dk nrf54l15dk nrf54lm20dk nrf7002dk nucleo_n657x0_q nucleo_u575zi_q siwx917_dk2605a stm32h7b3i_dk stm32wba65i_dk1
 

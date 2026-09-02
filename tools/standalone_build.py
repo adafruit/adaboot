@@ -17,7 +17,7 @@ get <key> <field>
 
         west_board   canonical Zephyr board id, e.g. nrf54l15dk/nrf54l15/cpuapp
         overlay      absolute path to dts/<vendor>/<key>.dtsi
-        mode         single_app | ram_load
+        mode         single_app | overwrite_only
         board_conf   absolute path to conf/<key>.conf, or an empty line if the
                      board has no board-specific conf fragment
 
@@ -39,12 +39,10 @@ CONF_DIR = MODULE_DIR / "conf"
 # Mirrors Zephyr's sysbuild image_configurations/BOOTLOADER_image_default.cmake
 # (SB_CONFIG_MCUBOOT_MODE_* -> CONFIG_*), but for a direct boot/zephyr build
 # rather than a sysbuild. "single_app" boots a single slot (no OTA secondary);
-# "overwrite_only" copies an update from slot1 onto slot0 without rollback;
-# "ram_load" copies the newer image to RAM before jumping to it.
+# "overwrite_only" copies an update from slot1 onto slot0 without rollback.
 MODE_CONFIG = {
     "single_app": "CONFIG_SINGLE_APPLICATION_SLOT=y",
     "overwrite_only": "CONFIG_BOOT_UPGRADE_ONLY=y",
-    "ram_load": "CONFIG_BOOT_RAM_LOAD=y",
 }
 
 

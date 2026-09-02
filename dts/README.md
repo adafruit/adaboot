@@ -49,7 +49,7 @@ the `mcuboot` flag there says which kind it is:
   `SB_CONFIG_BOOTLOADER_MCUBOOT=y` for them). Their layout defines (or appends
   to) `mcuboot`/`image-0`/`image-1`. `boards.toml` may set `mcuboot_mode`
   (default `single_app`) when the layout was planned for a different mode, e.g.
-  `ram_load` on the non-XIP STM32N6.
+  `overwrite_only` on ek_ra8d1.
 - **standalone boards** (`mcuboot = false`) — no mcuboot domain; the overlay is
   applied to the application image only. These include UF2-native boards (RP2),
   XIP/direct-boot boards (SiWG917, STM32H750B-DK). Their layout is hand-maintained

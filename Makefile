@@ -10,14 +10,9 @@
 # The board registry is tools/boards.toml. tools/partition_layout.py --gen-list
 # turns it into the generated, committed artifacts the build consumes:
 #   dts/<vendor>/<board>.dtsi      the partition layout (the source of truth)
-#   dts/boards.mk                 this Makefile's per-board lookup (board id,
-#                                 overlay path, RAM-load flag)
-#   dts/Kconfig.sysbuild           sysbuild bootloader policy
 # The upgrade mode (single_app vs swap-using-offset) is NOT looked up here: it
 # follows the layout through Kconfig (slot1_partition present -> swap), see
-# boot/zephyr/Kconfig BOOT_IMAGE_UPGRADE_MODE. RAM-load is the one mode not
-# derivable from the layout; it is flagged in dts/boards.mk and applied via a
-# conf fragment.
+# boot/zephyr/Kconfig BOOT_IMAGE_UPGRADE_MODE.
 #
 # Quick start:
 #   make workspace          # one-time: west init + west update (Adafruit Zephyr + HALs)
@@ -36,7 +31,7 @@ CONF_DIR := $(ADABOOT_DIR)/conf
 ZEPHYR_REV ?= 62e7a3764b652fff733cee43f23f82217403a51d
 
 # Generated, committed Make fragment: maps each partition key to its canonical
-# Zephyr board id, layout overlay and RAM-load flag. Regenerate with
+# Zephyr board id and layout overlay. Regenerate with
 # `python3 tools/partition_layout.py --gen-list` after editing boards.toml.
 -include $(ADABOOT_DIR)/dts/boards.mk
 
@@ -59,7 +54,6 @@ UF2_BOARDS ?= $(shell python3 $(ADABOOT_DIR)/tools/uf2_updater.py list)
 ifdef BOARD
 WEST_BOARD := $($(BOARD)_BOARD)
 OVERLAY    := $(ADABOOT_DIR)/$($(BOARD)_DTSI)
-RAM_LOAD   := $($(BOARD)_RAM_LOAD)
 # Optional board-specific conf fragment (conf/<key>.conf), empty if absent.
 # Hand-maintained board opt-ins (UF2, serial, retention).
 BOARD_CONF := $(wildcard $(CONF_DIR)/$(BOARD).conf)
@@ -71,24 +65,20 @@ BOARD_CONF := $(wildcard $(CONF_DIR)/$(BOARD).conf)
 # hand-maintained fragment so the computed geometry wins.
 BOARD_AUTOGEN_CONF := $(wildcard $(CONF_DIR)/$(BOARD)-autogen.conf)
 # Optional updater-specific overlay (dts/<vendor>/<key>-updater.dtsi), empty if
-# absent. Applied after the layout overlay for the updater build only. RAM-load
-# boards use it to link the updater into the chainloaded-application RAM below
-# the bootloader's own (FSBL) RAM region, which the SoC layer (e.g. the N6's
-# ram_check.ld) may assert.
+# absent. Applied after the layout overlay for the updater build only. Used by
+# boards whose updater must deviate from the layout -- e.g. the N6, whose
+# updater keeps its data RAM below the bootloader's own (FSBL) RAM region,
+# which the SoC layer's ram_check.ld may assert.
 UPDATER_OVERLAY := $(wildcard $(OVERLAY:.dtsi=-updater.dtsi))
 endif
 
 # Bootloader EXTRA_CONF_FILE:
 #   conf/adaboot.conf            universal Adaboot defaults (signature-none, SPI_NOR)
-#   conf/mode-ram_load.conf      RAM-load override (RAM-load boards only)
 #   conf/<key>.conf              board-specific opt-ins (UF2, serial, retention)
 #   conf/<key>-autogen.conf       generated sector layout
 #                                (CONFIG_BOOT_MAX_IMG_SECTORS, every board)
 # Zephyr treats EXTRA_CONF_FILE as a CMake list (semicolon-separated).
 BOOT_CONF_FILE := $(CONF_DIR)/adaboot.conf
-ifeq ($(RAM_LOAD),y)
-BOOT_CONF_FILE := $(BOOT_CONF_FILE);$(CONF_DIR)/mode-ram_load.conf
-endif
 ifneq ($(strip $(BOARD_CONF)),)
 BOOT_CONF_FILE := $(BOOT_CONF_FILE);$(BOARD_CONF)
 endif
@@ -96,17 +86,12 @@ ifneq ($(strip $(BOARD_AUTOGEN_CONF)),)
 BOOT_CONF_FILE := $(BOOT_CONF_FILE);$(BOARD_AUTOGEN_CONF)
 endif
 
-# Updater EXTRA_CONF_FILE: only the RAM-load override (the updater's single-app
-# mode and SPI_NOR are in its own prj.conf). The board-specific conf
-# (conf/<key>.conf) is NOT applied here -- it carries bootloader-only symbols
-# (BOOT_SERIAL_*, MCUBOOT_UF2_*, retention) that are undefined in the updater
-# app and would abort the Kconfig merge; the updater gets what it needs
-# (flash_map, retention for the recovery-mode request) from its own prj.conf.
-UPDATER_CONF_FILE :=
-ifeq ($(RAM_LOAD),y)
-UPDATER_CONF_FILE := $(CONF_DIR)/app-mode-ram_load.conf
-endif
-UPDATER_CONF_FLAG := $(if $(strip $(UPDATER_CONF_FILE)),-DEXTRA_CONF_FILE="$(UPDATER_CONF_FILE)")
+# The updater's configuration (single-app mode, SPI_NOR, XIP) is entirely in
+# its own prj.conf. The board-specific conf (conf/<key>.conf) is NOT applied
+# to it -- it carries bootloader-only symbols (BOOT_SERIAL_*, MCUBOOT_UF2_*,
+# retention) that are undefined in the updater app and would abort the Kconfig
+# merge; the updater gets what it needs (flash_map, retention for the
+# recovery-mode request) from its own prj.conf.
 
 .PHONY: help list show workspace update build updater uf2 all-uf2 all menuconfig flash \
         clean clean-all clean-workspace
@@ -145,11 +130,9 @@ list:
 show:
 	@echo "BOARD=$(BOARD)"
 	@echo "WEST_BOARD=$(WEST_BOARD)"
-	@echo "RAM_LOAD=$(RAM_LOAD)"
 	@echo "OVERLAY=$(OVERLAY)"
 	@echo "BOARD_CONF=$(BOARD_CONF)"
 	@echo "BOOT_CONF_FILE=$(BOOT_CONF_FILE)"
-	@echo "UPDATER_CONF_FLAG=$(UPDATER_CONF_FLAG)"
 	@echo "BUILD=$(BUILD)"
 	@echo "UPDATER=$(UPDATER)"
 
@@ -176,9 +159,9 @@ update: $(WORKSPACE_MANIFEST)
 # The board's partition layout (dts/<vendor>/<board>.dtsi) is applied via
 # EXTRA_DTC_OVERLAY_FILE (after boot/zephyr's app.overlay, which sets the
 # bootloader code partition). Adaboot defaults (signature-none, SPI_NOR) come
-# from conf/adaboot.conf; RAM-load and board-specific opt-ins layer on top.
-# The upgrade mode is chosen by Kconfig from the layout (slot1 -> swap), not by
-# a conf fragment. This repo is the Zephyr module (live tree) via
+# from conf/adaboot.conf; board-specific opt-ins layer on top. The upgrade
+# mode is chosen by Kconfig from the layout (slot1 -> swap). This repo is the
+# Zephyr module (live tree) via
 # EXTRA_ZEPHYR_MODULES, so the sources you are editing are the ones that get
 # compiled.
 build:
@@ -220,7 +203,6 @@ updater:
 	$(WEST) build -b $(WEST_BOARD) -d $(UPDATER) $(ADABOOT_DIR)/samples/bootloader-updater -- \
 	  -DEXTRA_ZEPHYR_MODULES=$(ADABOOT_DIR) \
 	  -DEXTRA_DTC_OVERLAY_FILE="$(if $(strip $(UPDATER_OVERLAY)),$(OVERLAY);$(UPDATER_OVERLAY),$(OVERLAY))" \
-	  $(UPDATER_CONF_FLAG) \
 	  -DMCUBOOT_IMAGE_BIN=$(ADABOOT_DIR)/$(BUILD)/mcuboot.bin
 	@echo "==> $(UPDATER)/zephyr/zephyr.signed.bin  (slot0: flash directly to self-update)"
 	@python3 $(ADABOOT_DIR)/tools/updater_sign.py slot1 $(UPDATER)

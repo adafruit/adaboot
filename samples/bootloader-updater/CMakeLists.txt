@@ -14,7 +14,6 @@
 #   west build -b <board> samples/bootloader-updater -- \
 #       -DEXTRA_ZEPHYR_MODULES=$PWD \
 #       -DEXTRA_DTC_OVERLAY_FILE=<path-to-board-layout.dtsi> \
-#       -DEXTRA_CONF_FILE=conf/app-mode-<single_app|ram_load>.conf \
 #       -DMCUBOOT_IMAGE_BIN=<path-to>/mcuboot.bin
 
 cmake_minimum_required(VERSION 3.20.0)

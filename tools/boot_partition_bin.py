@@ -16,10 +16,11 @@ FSBL flow: the SigningTool prepends the header the boot ROM needs) produce
 ``zephyr.signed.bin`` — that is the flashable bootloader image, so it is the
 preferred payload when present.
 
-RAM-linked bootloaders (CONFIG_BOOT_RAM_LOAD, or the N6's non-XIP FSBL) link
-at a RAM load address, so the hex carries no segments in the boot partition's
-flash-address window. There the boot partition simply stores the whole linked
-image, i.e. the flat ``zephyr.bin`` (or the signed variant above).
+RAM-linked bootloaders (CONFIG_XIP=n, e.g. the N6's FSBL, which the boot ROM
+loads into RAM) link at a RAM load address, so the hex carries no segments in
+the boot partition's flash-address window. There the boot partition simply
+stores the whole linked image, i.e. the flat ``zephyr.bin`` (or the signed
+variant above).
 
 This reads the build's ``zephyr.hex`` (address-based, so gap-free) plus its
 ``edt.pickle`` (the boot partition geometry the build actually used) and
@@ -60,14 +61,12 @@ def _load_edt(build_dir):
         return pickle.load(f)
 
 
-def _is_ram_load(build_dir):
-    """True if the build is a RAM-load (CONFIG_BOOT_RAM_LOAD) build."""
+def _is_ram_linked(build_dir):
+    """True if the build links to RAM instead of flash (CONFIG_XIP=n)."""
     config = pathlib.Path(build_dir) / "zephyr" / ".config"
     if not config.exists():
         return False
-    text = config.read_text()
-    return ("CONFIG_BOOT_RAM_LOAD=y" in text
-            or "CONFIG_SINGLE_APPLICATION_SLOT_RAM_LOAD=y" in text)
+    return "CONFIG_XIP=y" not in config.read_text()
 
 
 def main():
@@ -132,10 +131,11 @@ def main():
             print(f"copied {signed_path} to {out} (SoC-signed loader image)")
         return 0
 
-    # RAM-load build: the image is linked at its RAM load address, so the
-    # hex never overlaps the boot partition's flash-address window. The boot
-    # partition stores the whole linked image; the flat binary already is it.
-    if _is_ram_load(build):
+    # RAM-linked build (CONFIG_XIP=n): the image is linked at its RAM load
+    # address, so the hex never overlaps the boot partition's flash-address
+    # window. The boot partition stores the whole linked image; the flat
+    # binary already is it.
+    if _is_ram_linked(build):
         if not bin_path.exists():
             raise SystemExit(f"error: {bin_path} does not exist")
         data = bin_path.read_bytes()
@@ -144,7 +144,7 @@ def main():
         print(
             f"copied {bin_path} to {out} ({len(data)} bytes"
             + (f" of the {size}-byte boot partition" if size is not None else "")
-            + "; RAM-load image, linked at its RAM load address)"
+            + "; RAM-linked image, linked at its RAM load address)"
         )
         return 0
 

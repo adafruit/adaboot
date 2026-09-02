@@ -1447,13 +1447,12 @@ def gen_boards_mk():
 
     The standalone build used to resolve each board's Zephyr board id, layout
     overlay and mode at Make-parse time via ``tools/standalone_build.py get``.
-    The mode (single_app vs swap) now follows the layout through Kconfig (see
+    Now the Makefile only needs the canonical board id and the layout overlay
+    path (the upgrade mode follows the layout through Kconfig, see
     ``boot/zephyr/Kconfig``'s ``BOOT_IMAGE_UPGRADE_MODE`` default keyed on the
-    ``slot1_partition`` devicetree nodelabel), so it is not in this file. What the
-    Makefile still needs -- the canonical board id, the overlay path, and the one
-    mode that is *not* derivable from the layout (RAM-load, a CPU execution-model
-    property) -- is generated here from ``boards.toml`` so the Makefile never
-    shells out to Python to look a board up.
+    ``slot1_partition`` devicetree nodelabel), generated here from
+    ``boards.toml`` so the Makefile never shells out to Python to look a board
+    up.
     """
     boards = load_boards_manifest()
     keys = sorted(k for k, v in boards.items() if v["mcuboot"])
@@ -1466,35 +1465,26 @@ def gen_boards_mk():
         "# Make fragment consumed by the standalone Makefile. Maps each mcuboot",
         "# board partition key to its canonical Zephyr board id and layout overlay.",
         "# The upgrade mode (single_app vs swap-using-offset) is NOT here: it is",
-        "# chosen by Kconfig from the devicetree (slot1 present -> swap). RAM-load",
-        "# is the one mode not derivable from the layout, so it is flagged here.",
+        "# chosen by Kconfig from the devicetree (slot1 present -> swap).",
         "#",
         "# MCUBOOT_BOARDS   every partition key that boots via mcuboot",
         "# <key>_BOARD      canonical Zephyr board id (value passed to `west build -b`)",
         "# <key>_DTSI       path to the layout overlay (dts/<vendor>/<key>.dtsi)",
-        "# <key>_RAM_LOAD   y if the board boots via RAM-load (else unset)",
         "",
         f"MCUBOOT_BOARDS := {' '.join(keys)}",
         "",
     ]
-    ram_count = 0
     for key in keys:
         entry = boards[key]
         vendor = entry.get("vendor")
         lines.append(f"{key}_BOARD := {entry['board']}")
         if vendor:
             lines.append(f"{key}_DTSI := dts/{vendor}/{key}.dtsi")
-        if entry["mcuboot_mode"] == "ram_load":
-            lines.append(f"{key}_RAM_LOAD := y")
-            ram_count += 1
         lines.append("")
 
     BOARDS_MK.parent.mkdir(parents=True, exist_ok=True)
     BOARDS_MK.write_text("\n".join(lines) + "\n")
-    print(
-        f"  Wrote {BOARDS_MK.relative_to(MODULE_DIR.parent)}"
-        f" ({len(keys)} boards, {ram_count} ram_load)"
-    )
+    print(f"  Wrote {BOARDS_MK.relative_to(MODULE_DIR.parent)} ({len(keys)} boards)")
 
 
 def nor_page_layout_kconfigs(edt):

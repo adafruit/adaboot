@@ -87,26 +87,27 @@ What `make build` actually runs is, for `nrf54l15dk`:
 west build -b nrf54l15dk/nrf54l15/cpuapp -d build-nrf54l15dk boot/zephyr -- \
   -DEXTRA_ZEPHYR_MODULES=$PWD \
   -DEXTRA_DTC_OVERLAY_FILE=$PWD/dts/nordic/nrf54l15dk.dtsi \
-  -DEXTRA_CONF_FILE=$PWD/conf/mode-single_app.conf
+  -DEXTRA_CONF_FILE=$PWD/conf/adaboot.conf
 ```
 
 - `EXTRA_ZEPHYR_MODULES` makes this repo the mcuboot Zephyr module (so the
   `MCUBOOT_BOOTUTIL` library and the sysbuild entries come from this tree).
 - `EXTRA_DTC_OVERLAY_FILE` applies the board's partition layout *after*
   `boot/zephyr/app.overlay` (which sets the bootloader's own code partition).
-- `EXTRA_CONF_FILE` sets the mode and signature defaults (see below).
+- `EXTRA_CONF_FILE` sets the Adaboot defaults (see below).
 
 ## Modes and signatures
 
-Each board's `tools/boards.toml` entry has a `mcuboot_mode` (default
-`single_app`), which selects a conf fragment in `conf/`:
+The upgrade mode is not configured per board: it follows the partition layout
+through Kconfig (see `boot/zephyr/Kconfig`'s `BOOT_IMAGE_UPGRADE_MODE`). No
+`slot1_partition` in the layout -> single application slot; a
+`slot1_partition` present -> swap-using-offset (the planner sizes slot1 for
+it). Boards.toml may still record the `mcuboot_mode` a layout was planned for
+(e.g. `ek_ra8d1`'s `overwrite_only`) and the generated sysbuild defaults
+(`dts/Kconfig.sysbuild`, `dts/mcuboot_boards.cmake`) pick it up.
 
-| mode          | conf fragment            | sets                                            |
-|---------------|--------------------------|-------------------------------------------------|
-| `single_app`  | `conf/mode-single_app.conf` | `CONFIG_SINGLE_APPLICATION_SLOT=y`           |
-| `ram_load`    | `conf/mode-ram_load.conf`    | `CONFIG_BOOT_RAM_LOAD=y`                     |
-
-Both also set `CONFIG_BOOT_SIGNATURE_TYPE_NONE=y`. Adaboot is a UF2 /
+`conf/adaboot.conf` sets the universal defaults: `CONFIG_BOOT_SIGNATURE_TYPE_NONE=y`
+and `CONFIG_SPI_NOR=y`. Adaboot is a UF2 /
 serial-recovery bootloader, not a secure boot chain, so the bootloader image is
 built hash-only. To add image verification, set a signature type and key in a
 board-specific conf fragment instead.
@@ -116,9 +117,9 @@ board-specific conf fragment instead.
 A board can opt into USB/UART-dependent recovery features (UF2, serial
 recovery, the no-application fallback) by adding `conf/<key>.conf` (where
 `<key>` is the partition key, e.g. `nrf54lm20dk`). When present, `make build`
-and `make updater` append it -- after the mode conf -- to `EXTRA_CONF_FILE`, so
-its settings layer on top of the mode/signature defaults. Boards without a
-`conf/<key>.conf` build the minimal bootloader as before.
+and `make updater` append it -- after `conf/adaboot.conf` -- to
+`EXTRA_CONF_FILE`, so its settings layer on top of the signature defaults.
+Boards without a `conf/<key>.conf` build the minimal bootloader as before.
 
 For example, `conf/nrf54lm20dk.conf` enables UF2 drag-and-drop plus the
 `MCUBOOT_UF2_NO_APPLICATION` fallback, so the bootloader enters UF2 mode
@@ -185,10 +186,10 @@ make update                      # re-run west update (e.g. after bumping ZEPHYR
 
 ## Notes
 
-- `make build` builds a **minimal** bootloader (boot slot0, swap/ram-load per
-  mode, hash-only). UF2 and serial recovery are board-specific (they need a USB
+- `make build` builds a **minimal** bootloader (boot slot0, single-app or swap
+  per layout, hash-only). UF2 and serial recovery are board-specific (they need a USB
   or UART backend): add a `conf/<key>.conf` board fragment to opt a board in
-  (see "Board-specific conf fragments" above). The mode conf fragments
+  (see "Board-specific conf fragments" above). The conf fragments
   themselves stay hardware-agnostic.
 - The partition layout comes from this fork's `dts/`; if you edit a dtsi you see
   the change immediately (the overlay is read from this tree, not from `deps/`).

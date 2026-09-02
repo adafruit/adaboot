@@ -9,10 +9,8 @@
  * primary application slot (slot0) -- the bootloader's own app.overlay instead
  * points zephyr,code-partition at boot_partition.
  *
- * With CONFIG_BOOTLOADER_MCUBOOT=y Zephyr selects USE_DT_CODE_PARTITION (except
- * in ram_load mode), which makes the image link against zephyr,code-partition;
- * for ram_load boards USE_DT_CODE_PARTITION is not selected and this chosen
- * node is simply ignored, so the same overlay works for both modes.
+ * With CONFIG_BOOTLOADER_MCUBOOT=y Zephyr selects USE_DT_CODE_PARTITION, which
+ * makes the image link against zephyr,code-partition.
  */
 
 / {

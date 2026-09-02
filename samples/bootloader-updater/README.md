@@ -64,13 +64,11 @@ For a manual build (without the Makefile):
 west build -b nrf54l15dk/nrf54l15/cpuapp samples/bootloader-updater -- \
     -DEXTRA_ZEPHYR_MODULES=$PWD \
     -DEXTRA_DTC_OVERLAY_FILE=$PWD/dts/nordic/nrf54l15dk.dtsi \
-    -DEXTRA_CONF_FILE=$PWD/conf/app-mode-single_app.conf \
     -DMCUBOOT_IMAGE_BIN=$PWD/build-nrf54l15dk/mcuboot.bin
 ```
 
-The `app-mode-<mode>.conf` fragment mirrors `conf/mode-<mode>.conf` used for the
-bootloader, so imgtool sizes and aligns the updater image the way the bootloader
-expects (`MCUBOOT_BOOTLOADER_MODE_SINGLE_APP` or `_RAM_LOAD`).
+The updater's configuration (single-app signing, SPI_NOR, XIP) is entirely in
+its own `prj.conf`, so no extra conf fragment is needed.
 
 ## Layout it assumes
 
@@ -97,8 +95,7 @@ bootloader's own `app.overlay` instead points it at `boot_partition`).
 - **Erasing the boot partition while executing from slot0**: on devices where
   the boot partition and slot0 share one flash bank, erasing the boot partition
   can stall (or, on some MCUs, fault) the CPU while it is executing from slot0.
-  Adaboot's single-slot boards (e.g. nRF54L RRAM) tolerate this. RAM-load boards
-  execute the updater from RAM, so this is not a concern there.
+  Adaboot's single-slot boards (e.g. nRF54L RRAM) tolerate this.
 - **Bricking risk**: a failed write or power loss mid-update leaves the boot
   partition partially erased -- the device will not boot until the bootloader
   is recovered with a debugger. The updater erases the whole partition up

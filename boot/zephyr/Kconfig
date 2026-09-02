@@ -600,9 +600,7 @@ choice BOOT_IMAGE_UPGRADE_MODE
 	# emits. No secondary slot (no slot1_partition in the DT) -> single slot, and
 	# UF2/serial recovery overwrite slot0 directly. A slot1_partition present ->
 	# swap-using-offset, which is the mode the planner sizes slot1 for (slot1 =
-	# slot0 + one max-erase sector of scratch, see docs/design.md). RAM-load is the
-	# one mode not derivable from the layout; it is forced by a board conf
-	# fragment (CONFIG_BOOT_RAM_LOAD=y), which overrides this default.
+	# slot0 + one max-erase sector of scratch, see docs/design.md).
 	default SINGLE_APPLICATION_SLOT if !$(dt_nodelabel_enabled,slot1_partition)
 	default BOOT_SWAP_USING_OFFSET if $(dt_nodelabel_enabled,slot1_partition)
 	default BOOT_SWAP_USING_OFFSET if BOOT_PREFER_SWAP_OFFSET
