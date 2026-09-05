@@ -907,24 +907,79 @@ class TestPredefinedMcuboot:
         # New partitions added
         assert "nvm" in labels
         assert "filesystem" in labels
-        # Predefined set should contain the original labels. storage is NOT
-        # predefined: the fork always regenerates it (STORAGE_SIZE) at the
-        # end of the kept upstream partitions.
-        assert predefined == {"mcuboot", "image-0", "image-1"}
+        # The 512K upstream slots are grown (SLOT0_MIN_SIZE) and therefore
+        # re-emitted; only the untouched boot partition stays predefined.
+        # storage is NOT predefined: the fork always regenerates it
+        # (STORAGE_SIZE) after the slots.
+        assert predefined == {"mcuboot"}
         storage = [p for p in parts if p[0] == "storage"][0]
-        assert storage[2] == 0x110000
+        assert storage[2] == 0x210000
         assert storage[3] == 32 * KB
 
     def test_predefined_preserves_original_offsets(self):
-        """Original partition offsets and sizes should be unchanged."""
+        """Un-touched upstream partitions keep their offsets and sizes."""
         flash = _flash_with_partitions("flash0", 4 * MB, 4096, _DA14695_PARTITIONS)
         edt = _make_edt(flash)
         result = plan_partitions(edt)
         _, _, _, parts, _ = result[0]
         parts_by_label = {p[0]: p for p in parts}
-        for label, node_label, offset, size in _DA14695_PARTITIONS:
-            assert parts_by_label[label][2] == offset
-            assert parts_by_label[label][3] == size
+        # The boot partition is below SLOT0_MIN_SIZE's reach and is kept.
+        assert parts_by_label["mcuboot"][2] == 0x2400
+        assert parts_by_label["mcuboot"][3] == 0xDC00
+        # The slots are grown instead (see the growth test).
+
+    def test_predefined_slot0_min_grows_slots(self):
+        """Slots below SLOT0_MIN_SIZE are grown and the tail shifts."""
+        flash = _flash_with_partitions("flash0", 4 * MB, 4096, _DA14695_PARTITIONS)
+        edt = _make_edt(flash)
+        result = plan_partitions(edt)
+        _, total_size, erase, parts, predefined = result[0]
+        parts_by_label = {p[0]: p for p in parts}
+        # The boot partition is untouched; slot0 grows from boot_end.
+        assert parts_by_label["image-0"][2] == 0x10000
+        assert parts_by_label["image-0"][3] == 1 * MB
+        # slot1 grows to match and moves after the grown slot0.
+        assert parts_by_label["image-1"][2] == 0x110000
+        assert parts_by_label["image-1"][3] == 1 * MB
+        # The tail shifts past slot1.
+        assert parts_by_label["storage"][2] == 0x210000
+        # The grown slots are re-emitted (they override the upstream sizes);
+        # the untouched boot partition stays predefined.
+        assert predefined == {"mcuboot"}
+
+    def test_predefined_slot0_min_noop_when_big_enough(self):
+        """Slots at or above SLOT0_MIN_SIZE keep the upstream geometry."""
+        big = [
+            ("mcuboot", "boot_partition", 0x2400, 0xDC00),
+            ("image-0", "slot0_partition", 0x10000, 1536 * KB),
+            ("image-1", "slot1_partition", 0x190000, 1536 * KB),
+        ]
+        flash = _flash_with_partitions("flash0", 4 * MB, 4096, big)
+        edt = _make_edt(flash)
+        result = plan_partitions(edt)
+        _, _, _, parts, predefined = result[0]
+        parts_by_label = {p[0]: p for p in parts}
+        assert parts_by_label["image-0"][2] == 0x10000
+        assert parts_by_label["image-1"][2] == 0x190000
+        assert predefined == {"mcuboot", "image-0", "image-1"}
+
+    def test_predefined_slot0_min_skipped_when_tail_would_not_fit(self):
+        """Growth is skipped (upstream sizes kept) when the tail cannot fit."""
+        # A 1M flash cannot hold 1M slot0 + 1M slot1 plus the tail, so the
+        # upstream geometry is kept (with a warning).
+        small = [
+            ("mcuboot", "boot_partition", 0x2400, 0xDC00),
+            ("image-0", "slot0_partition", 0x10000, 512 * KB),
+            ("image-1", "slot1_partition", 0x90000, 300 * KB),
+        ]
+        flash = _flash_with_partitions("flash0", 1 * MB, 4096, small)
+        edt = _make_edt(flash)
+        result = plan_partitions(edt)
+        _, _, _, parts, predefined = result[0]
+        parts_by_label = {p[0]: p for p in parts}
+        # slot0/slot1 keep their upstream geometry.
+        assert parts_by_label["image-0"][3] == 512 * KB
+        assert predefined == {"mcuboot", "image-0", "image-1"}
 
     def test_predefined_new_partitions_dont_overlap(self):
         """New partitions should not overlap with existing ones."""
@@ -965,15 +1020,19 @@ class TestPredefinedMcuboot:
         assert fs[2] + fs[3] == total_size
 
     def test_predefined_dtsi_only_has_new_partitions(self):
-        """Generated dtsi should only contain new (non-predefined) partitions."""
+        """Generated dtsi only contains non-predefined (or grown) partitions."""
         flash = _flash_with_partitions("flash0", 4 * MB, 4096, _DA14695_PARTITIONS)
         edt = _make_edt(flash)
         result = plan_partitions(edt)
         dtsi = generate_partitions_dtsi(result)
         assert 'label = "nvm"' in dtsi
         assert 'label = "filesystem"' in dtsi
+        # The untouched boot partition stays predefined.
         assert 'label = "mcuboot"' not in dtsi
-        assert 'label = "image-0"' not in dtsi
+        # The 512K upstream slots are below SLOT0_MIN_SIZE, so the grown
+        # slots are re-emitted to override the upstream sizes.
+        assert 'label = "image-0"' in dtsi
+        assert 'label = "image-1"' in dtsi
 
     def test_existing_app_partitions_replaced(self):
         """Existing filesystem/nvm partitions from a prior overlay should be replaced."""

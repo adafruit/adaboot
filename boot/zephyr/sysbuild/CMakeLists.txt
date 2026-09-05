@@ -8,6 +8,29 @@
 # this build. See dts/README.md.
 include(${ZEPHYR_MCUBOOT_MODULE_DIR}/dts/sysbuild.cmake)
 
+# Apply the fork's bootloader conf fragments (conf/adaboot.conf,
+# conf/<key>.conf, conf/<key>-autogen.conf) to the mcuboot image, mirroring
+# the standalone Makefile's BOOT_CONF_FILE. They are appended after whatever
+# the application queued in <image>_EXTRA_CONF_FILE (e.g. a
+# sysbuild/mcuboot.conf) so the fork's policy wins. Without this, a sysbuild
+# build would miss the fork's own board opt-ins (serial recovery entrances,
+# UF2 opt-outs, BOOT_MAX_IMG_SECTORS geometry, SPI NOR for slot1's device, ...).
+if(SB_CONFIG_BOOTLOADER_MCUBOOT AND TARGET mcuboot)
+  set(adaboot_conf_dir ${ZEPHYR_MCUBOOT_MODULE_DIR}/conf)
+  set(adaboot_confs ${adaboot_conf_dir}/adaboot.conf)
+  foreach(f ${adaboot_conf_dir}/${adaboot_layout_key}.conf
+            ${adaboot_conf_dir}/${adaboot_layout_key}-autogen.conf)
+    if(EXISTS ${f})
+      list(APPEND adaboot_confs ${f})
+    endif()
+  endforeach()
+
+  get_property(mcuboot_confs CACHE mcuboot_EXTRA_CONF_FILE PROPERTY VALUE)
+  list(APPEND mcuboot_confs ${adaboot_confs})
+  set(mcuboot_EXTRA_CONF_FILE "${mcuboot_confs}"
+      CACHE INTERNAL "MCUboot conf fragments, including the fork's" FORCE)
+endif()
+
 function(mathup num align result)
   math(EXPR out "(((${num}) + ((${align}) - 1)) & ~((${align}) - 1))")
   set(${result} "${out}" PARENT_SCOPE)

@@ -16,28 +16,33 @@
 		#size-cells = <1>;
 
 		boot_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
 			label = "mcuboot";
 			reg = <0x0 DT_SIZE_K(64)>;
 		};
 
 		slot0_partition: partition@10000 {
+			compatible = "zephyr,mapped-partition";
 			label = "image-0";
-			reg = <0x10000 DT_SIZE_K(960)>;
+			reg = <0x10000 DT_SIZE_M(1)>;
 		};
 
-		storage_partition: partition@100000 {
+		storage_partition: partition@110000 {
+			compatible = "zephyr,mapped-partition";
 			label = "storage";
-			reg = <0x100000 DT_SIZE_K(32)>;
+			reg = <0x110000 DT_SIZE_K(32)>;
 		};
 
-		nvm_partition: partition@108000 {
+		nvm_partition: partition@118000 {
+			compatible = "zephyr,mapped-partition";
 			label = "nvm";
-			reg = <0x108000 DT_SIZE_K(8)>;
+			reg = <0x118000 DT_SIZE_K(8)>;
 		};
 
-		littlefs_partition: partition@10a000 {
+		fatfs_partition: partition@11a000 {
+			compatible = "zephyr,mapped-partition";
 			label = "filesystem";
-			reg = <0x10a000 DT_SIZE_K(984)>;
+			reg = <0x11a000 DT_SIZE_K(920)>;
 		};
 	};
 };

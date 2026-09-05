@@ -13,16 +13,19 @@
 	partitions {
 
 		storage_partition: partition@620000 {
+			compatible = "zephyr,mapped-partition";
 			label = "storage";
 			reg = <0x620000 DT_SIZE_K(32)>;
 		};
 
 		nvm_partition: partition@628000 {
+			compatible = "zephyr,mapped-partition";
 			label = "nvm";
 			reg = <0x628000 DT_SIZE_K(4)>;
 		};
 
 		fatfs_partition: partition@629000 {
+			compatible = "zephyr,mapped-partition";
 			label = "filesystem";
 			reg = <0x629000 DT_SIZE_K(59228)>;
 		};

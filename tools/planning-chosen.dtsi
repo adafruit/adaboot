@@ -1,0 +1,18 @@
+/* Planning-build-only overlay, applied by tools/partition_layout.py
+ * alongside a board's layout glue when planning (never in real builds).
+ *
+ * Some upstream board dts point /chosen/zephyr,code-partition at a partition
+ * label the fork's layout deletes (e.g. nrf54h20dk's cpuapp_slot0_partition).
+ * Real builds don't notice: the bootloader image re-points the property via
+ * boot/zephyr/app.overlay (boot_partition) and application images via their
+ * board overlay (the fork's slot0). The planning build (hello_world) has
+ * neither, so the dangling reference fails devicetree compilation. Deleting
+ * the property here is safe for planning: plan_partitions() and
+ * plan_code_partition_split() derive everything from the flash devices, not
+ * from chosen.
+ */
+/ {
+	chosen {
+		/delete-property/ zephyr,code-partition;
+	};
+};

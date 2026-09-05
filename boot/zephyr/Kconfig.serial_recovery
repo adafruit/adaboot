@@ -6,6 +6,7 @@
 
 menuconfig MCUBOOT_SERIAL
 	bool "MCUboot serial recovery"
+	default y if !$(dt_nodelabel_enabled,zephyr_udc0)
 	select REBOOT
 	select SERIAL
 	select UART_INTERRUPT_DRIVEN
@@ -17,6 +18,11 @@ menuconfig MCUBOOT_SERIAL
 	  If y, enables a serial-port based update mode. This allows
 	  MCUboot itself to load update images into flash over a UART.
 	  If unsure, leave at the default value.
+
+	  Defaults on for boards whose devicetree has no native USB device
+	  controller (zephyr_udc0), which cannot run the UF2 drive; there
+	  serial recovery is the update interface. Explicit assignments in a
+	  conf fragment still win.
 
 if MCUBOOT_SERIAL
 
@@ -281,6 +287,7 @@ config BOOT_SERIAL_DETECT_DELAY
 
 menuconfig BOOT_SERIAL_WAIT_FOR_DFU
 	bool "Wait a prescribed duration to see if DFU is invoked by receiving a MCUmgr comand"
+	default y if !$(dt_nodelabel_enabled,zephyr_udc0)
 	depends on (BOOT_SERIAL_UART || BOOT_SERIAL_CDC_ACM) && \
 		   (!MCUBOOT_UF2 || !BOOT_SERIAL_CDC_ACM)
 	help
@@ -346,9 +353,18 @@ config BOOT_SERIAL_INACTIVITY_TIMEOUT
 
 config BOOT_SERIAL_NO_APPLICATION
 	bool "Stay in bootloader if no application"
+	default y if !$(dt_nodelabel_enabled,zephyr_udc0)
 	help
 	  Allows for entering serial recovery mode if there is no bootable
 	  application that the bootloader can jump to.
+
+# serial_adapter() is the UART device that serial recovery drives directly.
+# When it runs on the console UART, serial_adapter.c #errors while UART
+# console owns the port, so take the console off the UART. Boards that
+# redirect MCUmgr to a different UART can re-enable UART_CONSOLE in their
+# own fragment (assignments win over this default).
+config UART_CONSOLE
+	default n if MCUBOOT_SERIAL && BOOT_SERIAL_UART
 
 config BOOT_SERIAL_PIN_RESET
 	bool "Check for device reset by pin"

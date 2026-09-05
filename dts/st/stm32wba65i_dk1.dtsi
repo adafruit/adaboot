@@ -1,4 +1,53 @@
 /* Delete Zephyr-default partitions before redefining them. */
 &flash0 { /delete-node/ partitions; };
 
+/* Enable the OTG HS controller and its internal PHY for the bootloader's
+ * UF2 drive. The application's board overlay enables them as well; this
+ * keeps the bootloader image self-contained (USBD_DEVICE_DEFINE links
+ * against the node's device).
+ *
+ * USB on STM32WBA requires VOS Range 1. Zephyr selects VOS from HCLK, and
+ * 16 MHz keeps it in Range 2, which trips an assertion in udc_stm32. Run
+ * SYSCLK from full 32 MHz HSE so VOS is set to Range 1. (The application
+ * image gets the same treatment from its board overlay.)
+ */
+&clk_hse {
+	/delete-property/ hse-div2;
+};
+
+&rcc {
+	clock-frequency = <DT_FREQ_M(32)>;
+	ahb5-prescaler = <1>;
+};
+
+zephyr_udc0: &usbotg_hs {
+	status = "okay";
+};
+
+&otghs_phy {
+	/* OTG HS clock source is 32 MHz HSE */
+	clocks = <&rcc STM32_CLOCK(AHB2, 15)>,
+		 <&rcc STM32_SRC_HSE OTGHS_SEL(0)>;
+	clock-reference = "SYSCFG_OTG_HS_PHY_CLK_32MHz";
+	status = "okay";
+};
+
+/* The DK1 has no push button; the joystick's selector (center) button is
+ * wired to PA3 with an external pull-up, so it reads active-low.
+ */
+/ {
+	gpio_keys {
+		compatible = "gpio-keys";
+
+		user_button: button_0 {
+			label = "Joystick selector";
+			gpios = <&gpioa 3 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+	aliases {
+		mcuboot-button0 = &user_button;
+	};
+};
+
 #include "stm32wba65i_dk1-partitions.dtsi"

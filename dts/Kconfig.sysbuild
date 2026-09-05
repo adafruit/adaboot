@@ -27,6 +27,7 @@ config ADABOOT_BOARD
 	default y if $(BOARD) = "nucleo_n657x0_q"
 	default y if $(BOARD) = "nucleo_u575zi_q"
 	default y if $(BOARD) = "siwx917_dk2605a"
+	default y if $(BOARD) = "stm32h750b_dk"
 	default y if $(BOARD) = "stm32h7b3i_dk"
 	default y if $(BOARD) = "stm32wba65i_dk1"
 	help

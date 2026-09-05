@@ -4,10 +4,18 @@
 
 menuconfig MCUBOOT_UF2
 	bool "MCUboot UF2 drag-and-drop update"
+	default y if $(dt_nodelabel_enabled,zephyr_udc0)
 	select USB_DEVICE_STACK_NEXT
 	select USBD_MSC_CLASS
 	select DISK_ACCESS
 	select REBOOT
+	# The USB device controller drivers require kernel threads (e.g.
+	# UDC_DWC2 selects EVENTS, which depends on MULTITHREADING), but
+	# MCUboot defaults MULTITHREADING off on Nordic/ESP32 SoCs to save
+	# code size; only the legacy USB paths (BOOT_SERIAL_CDC_ACM,
+	# BOOT_USB_DFU_GPIO/WAIT) re-enable it. Mirror that here for the
+	# UF2 (device-next stack) path.
+	select MULTITHREADING
 	depends on !BOOT_FIRMWARE_LOADER
 	help
 	  If y, enables UF2 drag-and-drop firmware update mode.
@@ -20,6 +28,12 @@ menuconfig MCUBOOT_UF2
 	  UF2 mass storage drive and SMP over the serial recovery port at the
 	  same time, on one USB device. When the serial recovery port is CDC
 	  ACM, both share the UF2 USB identity (VID/PID and descriptors).
+
+	  Defaults on for boards whose devicetree has a native USB device
+	  controller (zephyr_udc0) and off otherwise, so applications don't
+	  have to force this per board: boards without USB fall back to UART
+	  serial recovery (see MCUBOOT_SERIAL). Explicit assignments in a conf
+	  fragment still win.
 
 if MCUBOOT_UF2
 
@@ -130,6 +144,7 @@ menu "Entrance methods"
 
 config MCUBOOT_UF2_ENTRANCE_GPIO
 	bool "Enter UF2 mode via GPIO"
+	default y
 	depends on GPIO
 	help
 	  Use the same GPIO detection as serial recovery
@@ -163,6 +178,7 @@ config MCUBOOT_UF2_DOUBLE_TAP_DELAY
 
 config MCUBOOT_UF2_NO_APPLICATION
 	bool "Enter UF2 mode if no bootable application"
+	default y
 	help
 	  If no valid application is found, enter UF2 mode
 	  instead of halting.

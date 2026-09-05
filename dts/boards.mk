@@ -11,7 +11,7 @@
 # <key>_BOARD      canonical Zephyr board id (value passed to `west build -b`)
 # <key>_DTSI       path to the layout overlay (dts/<vendor>/<key>.dtsi)
 
-MCUBOOT_BOARDS := da14695_dk_usb ek_ra6m5 ek_ra8d1 frdm_mcxn947 frdm_rw612 mimxrt1170_evk nrf5340dk nrf54h20dk nrf54l15dk nrf54lm20dk nrf7002dk nucleo_n657x0_q nucleo_u575zi_q siwx917_dk2605a stm32h7b3i_dk stm32wba65i_dk1
+MCUBOOT_BOARDS := da14695_dk_usb ek_ra6m5 ek_ra8d1 frdm_mcxn947 frdm_rw612 mimxrt1170_evk nrf5340dk nrf54h20dk nrf54l15dk nrf54lm20dk nrf7002dk nucleo_n657x0_q nucleo_u575zi_q siwx917_dk2605a stm32h750b_dk stm32h7b3i_dk stm32wba65i_dk1
 
 da14695_dk_usb_BOARD := da14695_dk_usb
 da14695_dk_usb_DTSI := dts/renesas/da14695_dk_usb.dtsi
@@ -54,6 +54,9 @@ nucleo_u575zi_q_DTSI := dts/st/nucleo_u575zi_q.dtsi
 
 siwx917_dk2605a_BOARD := siwx917_dk2605a
 siwx917_dk2605a_DTSI := dts/silabs/siwx917_dk2605a.dtsi
+
+stm32h750b_dk_BOARD := stm32h750b_dk/stm32h750xx/ext_flash_app
+stm32h750b_dk_DTSI := dts/st/stm32h750b_dk.dtsi
 
 stm32h7b3i_dk_BOARD := stm32h7b3i_dk
 stm32h7b3i_dk_DTSI := dts/st/stm32h7b3i_dk.dtsi

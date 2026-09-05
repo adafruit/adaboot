@@ -1,0 +1,27 @@
+/* nrf54lm20bsim layout (host simulation, no mcuboot): applied to the
+ * application image only. There is no real flash -- upstream's cpuapp_rram is
+ * a simulated device -- so this replaces the upstream layout with one for the
+ * CircuitPython port: the whole simulated RRAM minus storage is the user
+ * filesystem (the node label stays fatfs_partition; the supervisor opens the
+ * filesystem by that nodelabel).
+ */
+&cpuapp_rram {
+	/delete-node/ partitions;
+
+	partitions {
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		fatfs_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "filesystem";
+			reg = <0x00000000 (DT_SIZE_K(2036) - DT_SIZE_K(32))>;
+		};
+
+		storage_partition: partition@1f5000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x001f5000 DT_SIZE_K(32)>;
+		};
+	};
+};

@@ -12,6 +12,8 @@
 #                         layout here but not in this list (mcuboot = false)
 #                         run standalone -- the layout goes to the app only.
 
+set(MCUBOOT_LAYOUT_adafruit_clue_nrf52840 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_clue_nrf52840.dtsi" CACHE INTERNAL "adafruit_clue_nrf52840 partition layout")
+set(MCUBOOT_LAYOUT_adafruit_feather_nrf52840 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_feather_nrf52840.dtsi" CACHE INTERNAL "adafruit_feather_nrf52840 partition layout")
 set(MCUBOOT_LAYOUT_adafruit_feather_rp2040 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_feather_rp2040.dtsi" CACHE INTERNAL "adafruit_feather_rp2040 partition layout")
 set(MCUBOOT_LAYOUT_da14695_dk_usb "${CMAKE_CURRENT_LIST_DIR}/renesas/da14695_dk_usb.dtsi" CACHE INTERNAL "da14695_dk_usb partition layout")
 set(MCUBOOT_LAYOUT_ek_ra6m5 "${CMAKE_CURRENT_LIST_DIR}/renesas/ek_ra6m5.dtsi" CACHE INTERNAL "ek_ra6m5 partition layout")
@@ -19,13 +21,15 @@ set(MCUBOOT_LAYOUT_ek_ra8d1 "${CMAKE_CURRENT_LIST_DIR}/renesas/ek_ra8d1.dtsi" CA
 set(MCUBOOT_LAYOUT_frdm_mcxn947 "${CMAKE_CURRENT_LIST_DIR}/nxp/frdm_mcxn947.dtsi" CACHE INTERNAL "frdm_mcxn947 partition layout")
 set(MCUBOOT_LAYOUT_frdm_rw612 "${CMAKE_CURRENT_LIST_DIR}/nxp/frdm_rw612.dtsi" CACHE INTERNAL "frdm_rw612 partition layout")
 set(MCUBOOT_LAYOUT_mimxrt1170_evk "${CMAKE_CURRENT_LIST_DIR}/nxp/mimxrt1170_evk.dtsi" CACHE INTERNAL "mimxrt1170_evk partition layout")
+set(MCUBOOT_LAYOUT_native_sim "${CMAKE_CURRENT_LIST_DIR}/native/native_sim.dtsi" CACHE INTERNAL "native_sim partition layout")
+set(MCUBOOT_LAYOUT_nrf5340bsim "${CMAKE_CURRENT_LIST_DIR}/native/nrf5340bsim.dtsi" CACHE INTERNAL "nrf5340bsim partition layout")
 set(MCUBOOT_LAYOUT_nrf5340dk "${CMAKE_CURRENT_LIST_DIR}/nordic/nrf5340dk.dtsi" CACHE INTERNAL "nrf5340dk partition layout")
 set(MCUBOOT_LAYOUT_nrf54h20dk "${CMAKE_CURRENT_LIST_DIR}/nordic/nrf54h20dk.dtsi" CACHE INTERNAL "nrf54h20dk partition layout")
 set(MCUBOOT_LAYOUT_nrf54l15dk "${CMAKE_CURRENT_LIST_DIR}/nordic/nrf54l15dk.dtsi" CACHE INTERNAL "nrf54l15dk partition layout")
+set(MCUBOOT_LAYOUT_nrf54lm20bsim "${CMAKE_CURRENT_LIST_DIR}/native/nrf54lm20bsim.dtsi" CACHE INTERNAL "nrf54lm20bsim partition layout")
 set(MCUBOOT_LAYOUT_nrf54lm20dk "${CMAKE_CURRENT_LIST_DIR}/nordic/nrf54lm20dk.dtsi" CACHE INTERNAL "nrf54lm20dk partition layout")
 set(MCUBOOT_LAYOUT_nrf7002dk "${CMAKE_CURRENT_LIST_DIR}/nordic/nrf7002dk.dtsi" CACHE INTERNAL "nrf7002dk partition layout")
 set(MCUBOOT_LAYOUT_nucleo_n657x0_q "${CMAKE_CURRENT_LIST_DIR}/st/nucleo_n657x0_q.dtsi" CACHE INTERNAL "nucleo_n657x0_q partition layout")
-set(MCUBOOT_LAYOUT_nucleo_n657x0_q-updater "${CMAKE_CURRENT_LIST_DIR}/st/nucleo_n657x0_q-updater.dtsi" CACHE INTERNAL "nucleo_n657x0_q-updater partition layout")
 set(MCUBOOT_LAYOUT_nucleo_u575zi_q "${CMAKE_CURRENT_LIST_DIR}/st/nucleo_u575zi_q.dtsi" CACHE INTERNAL "nucleo_u575zi_q partition layout")
 set(MCUBOOT_LAYOUT_rpi_pico "${CMAKE_CURRENT_LIST_DIR}/raspberrypi/rpi_pico.dtsi" CACHE INTERNAL "rpi_pico partition layout")
 set(MCUBOOT_LAYOUT_rpi_pico2 "${CMAKE_CURRENT_LIST_DIR}/raspberrypi/rpi_pico2.dtsi" CACHE INTERNAL "rpi_pico2 partition layout")
@@ -35,6 +39,8 @@ set(MCUBOOT_LAYOUT_stm32h7b3i_dk "${CMAKE_CURRENT_LIST_DIR}/st/stm32h7b3i_dk.dts
 set(MCUBOOT_LAYOUT_stm32wba65i_dk1 "${CMAKE_CURRENT_LIST_DIR}/st/stm32wba65i_dk1.dtsi" CACHE INTERNAL "stm32wba65i_dk1 partition layout")
 
 set(MCUBOOT_LAYOUT_BOARDS
+    adafruit_clue_nrf52840
+    adafruit_feather_nrf52840
     adafruit_feather_rp2040
     da14695_dk_usb
     ek_ra6m5
@@ -42,13 +48,15 @@ set(MCUBOOT_LAYOUT_BOARDS
     frdm_mcxn947
     frdm_rw612
     mimxrt1170_evk
+    native_sim
+    nrf5340bsim
     nrf5340dk
     nrf54h20dk
     nrf54l15dk
+    nrf54lm20bsim
     nrf54lm20dk
     nrf7002dk
     nucleo_n657x0_q
-    nucleo_n657x0_q-updater
     nucleo_u575zi_q
     rpi_pico
     rpi_pico2
@@ -74,6 +82,7 @@ set(MCUBOOT_BOARDS
     nucleo_n657x0_q
     nucleo_u575zi_q
     siwx917_dk2605a
+    stm32h750b_dk
     stm32h7b3i_dk
     stm32wba65i_dk1
     CACHE INTERNAL "Boards that boot via mcuboot (per this fork's boards.toml; mcuboot = true)"

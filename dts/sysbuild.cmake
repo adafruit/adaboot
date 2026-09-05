@@ -28,6 +28,24 @@ if(adaboot_layout)
   endif()
 
   foreach(image ${adaboot_layout_images})
+    # Prefer prepending the layout to an image's own DTC_OVERLAY_FILE: the
+    # layout then comes first, so labels it defines (e.g. zephyr_udc0 on
+    # boards whose SoC DTS leaves the controller unlabeled) are visible to the
+    # application's overlays, which reference them (CircuitPython's app.overlay
+    # attaches its CDC ACM endpoints to &zephyr_udc0).
+    # Only do this when the application set DTC_OVERLAY_FILE itself: setting
+    # it would otherwise suppress Zephyr's automatic <app>/app.overlay lookup
+    # for applications that rely on it. For those (and for images like mcuboot
+    # whose app.overlay is auto-detected), fall back to appending the layout as
+    # an EXTRA overlay, which is applied after the image's own overlays.
+    get_property(image_dtc_overlay CACHE ${image}_DTC_OVERLAY_FILE PROPERTY VALUE)
+    if(image STREQUAL DEFAULT_IMAGE AND image_dtc_overlay)
+      set(${image}_DTC_OVERLAY_FILE "${adaboot_layout};${image_dtc_overlay}"
+          CACHE INTERNAL "Partition layout prepended to ${image} devicetree overlays" FORCE
+      )
+      continue()
+    endif()
+
     # Append rather than set: sysbuild may already have queued image defaults.
     set(adaboot_overlays ${${image}_EXTRA_DTC_OVERLAY_FILE})
     if(NOT "${adaboot_layout}" IN_LIST adaboot_overlays)

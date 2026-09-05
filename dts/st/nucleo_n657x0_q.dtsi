@@ -21,6 +21,31 @@
 		reg = <0x0 DT_SIZE_M(64)>;
 		write-block-size = <1>;
 		erase-block-size = <DT_SIZE_K(4)>;
+
+		/* Map the flash's child address space into the CPU's memory-mapped
+		 * window so the mapped-partition reg addresses resolve absolutely
+		 * (the partitions node included below only carries an empty
+		 * `ranges;`, and an NVM memory node must carry its own ranges per
+		 * the zephyr,mapped-partition binding). Without this, the linker's
+		 * ROM_ADDR (DT_REG_ADDR of the chosen code partition) and mcuboot's
+		 * XIP jump disagree with where the code actually executes.
+		 */
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges = <0x0 0x70000000 DT_SIZE_M(64)>;
+	};
+};
+
+/* The fork's generated partitions dtsi (included below) must be
+ * self-contained, so the delete applies to the device the layout hangs off
+ * as well: without it the planner treats its own previous output as an
+ * upstream predefined layout and skips re-emitting the boot/slot partitions.
+ */
+&xip_flash { /delete-node/ partitions; };
+
+/ {
+	aliases {
+		mcuboot-button0 = &user_button;
 	};
 };
 

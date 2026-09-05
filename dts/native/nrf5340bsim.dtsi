@@ -1,0 +1,26 @@
+/* nrf5340bsim layout (host simulation, no mcuboot): applied to the
+ * application image only. There is no real flash -- upstream's flash0 is a
+ * simulated device -- so this replaces the upstream layout with one for the
+ * CircuitPython port: the whole simulated flash minus storage is the user
+ * filesystem.
+ */
+&flash0 {
+	/delete-node/ partitions;
+
+	partitions {
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		filesystem_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "filesystem";
+			reg = <0x00000000 DT_SIZE_K(1008)>;
+		};
+
+		storage_partition: partition@fc000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x000fc000 DT_SIZE_K(16)>;
+		};
+	};
+};

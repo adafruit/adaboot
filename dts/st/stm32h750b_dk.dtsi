@@ -1,14 +1,33 @@
-/* STM32H750B-DK standalone layout (no mcuboot): applied to the application
- * image only.
- *
- * The filesystem and a settings partition live on the external QSPI flash
- * (ext_flash). The upstream board DTS already partitions ext_flash with a
- * storage partition covering the whole device, which is deleted here and
- * replaced with storage + filesystem in the last 8 MB of the flash.
- *
- * The board has a native USB OTG FS connector, so the filesystem partition
- * is fatfs (exposed over USB mass storage) and the controller is enabled
- * here: the upstream board DTS leaves usbotg_fs disabled.
+/* Delete Zephyr-default partitions before redefining them: the fork keeps
+ * the bootloader in the 128 KB internal flash (the whole device -- there is
+ * no room for an app slot after it) and XIPs the slots from the QSPI NOR's
+ * memory-mapped window (0x90000000). The partitions dtsi included below hangs
+ * the layout off ext_flash, the soc-nv-flash child of the QSPI controller;
+ * the runtime flash driver is still the parent st,stm32-qspi-nor (flash_map
+ * walks up the parent chain to find it).
+ */
+&flash0 {
+	/delete-node/ partitions;
+};
+
+&ext_flash {
+	/* Map the flash's child address space into the CPU's memory-mapped
+	 * window so the mapped-partition reg addresses resolve absolutely (the
+	 * partitions node below only carries an empty `ranges;`). The upstream
+	 * controller already maps its own child space to 0x90000000; this
+	 * mirrors it on the flash device itself, as the zephyr,mapped-partition
+	 * binding requires of the NVM memory node.
+	 */
+	#address-cells = <1>;
+	#size-cells = <1>;
+	ranges = <0x0 0x90000000 DT_SIZE_M(128)>;
+
+	/delete-node/ partitions;
+};
+
+/* Enable the OTG FS controller for the bootloader's UF2 drive. The board
+ * overlay in the application enables it as well; this keeps the bootloader
+ * image self-contained (USBD_DEVICE_DEFINE links against the node's device).
  */
 zephyr_udc0: &usbotg_fs {
 	pinctrl-0 = <&usb_otg_fs_dm_pa11 &usb_otg_fs_dp_pa12>;
@@ -16,20 +35,21 @@ zephyr_udc0: &usbotg_fs {
 	status = "okay";
 };
 
-&ext_flash {
-	partitions {
-		/delete-node/ partition@0;
-
-		storage_partition: partition@7800000 {
-			compatible = "zephyr,mapped-partition";
-			label = "storage";
-			reg = <0x7800000 DT_SIZE_K(32)>;
-		};
-
-		fatfs_partition: partition@7808000 {
-			compatible = "zephyr,mapped-partition";
-			label = "filesystem";
-			reg = <0x7808000 (DT_SIZE_M(8) - DT_SIZE_K(32))>;
-		};
+/ {
+	aliases {
+		mcuboot-button0 = &user_button;
 	};
 };
+
+#include "stm32h750b_dk-partitions.dtsi"
+
+/* Flash chosen properties needed by both builds:
+ * - zephyr,flash mirrors upstream (the XIP flash: the STM32 soc layer derives
+ *   the linker's flash base from it, and the imgtool signing step in
+ *   deps/zephyr/cmake/mcuboot.cmake reads write-block-size from it).
+ * - zephyr,code-partition is deliberately not set here -- upstream's
+ *   ext_flash_app variant dts points it at slot0_partition for XIP
+ *   applications (the label is re-defined by the partitions dtsi above), and
+ *   boot/zephyr/app.overlay points it at boot_partition (internal flash) for
+ *   the bootloader.
+ */

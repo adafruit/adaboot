@@ -13,6 +13,15 @@
 # allow a second slot -- for boards with no wireless loading path, where the
 # filesystem gets the space instead (the fork's partitioning philosophy).
 #
+# [boards.<key>] additionally supports:
+#
+# [boards.<key>]
+# single_app = true            # plan a single-app layout (no image-1) even
+#                              # when the flash geometry would allow a second
+#                              # slot -- for boards with no wireless loading
+#                              # path, where the filesystem gets the space
+#                              # instead (the fork's partitioning philosophy).
+#
 # mcuboot = true (the default): the board boots via mcuboot (Adaboot). The
 # partition_layout.py planner generates its dtsi (`--fix`) and --gen-list puts
 # it in MCUBOOT_BOARDS / dts/Kconfig.sysbuild, and `make all` builds a mcuboot
@@ -21,13 +30,12 @@
 # the planner splits that region into boot+slot0 and emits a
 # zephyr,mapped-partition overlay that keeps the loader-owned partitions.
 #
-# mcuboot = false: the board is standalone -- it has no mcuboot domain (RP2040 /
-# RP2350 boot from their own UF2 second-stage loader, STM32H750B-DK executes in
-# place). Its dtsi is hand-maintained (a zephyr,mapped-partition layout the
-# planner cannot emit), so --fix refuses to touch it and --gen-list leaves it
-# out of MCUBOOT_BOARDS / Kconfig.sysbuild. It is still registered here so the
-# dts/ tree and this file cannot drift, and so `--list` is the complete index
-# of layouts.
+# mcuboot = false: the board is standalone -- it has no mcuboot domain
+# (RP2040 / RP2350 boot from their own UF2 second-stage loader). Its dtsi is
+# hand-maintained (a zephyr,mapped-partition layout the planner cannot emit),
+# so --fix refuses to touch it and --gen-list leaves it out of MCUBOOT_BOARDS /
+# Kconfig.sysbuild. It is still registered here so the dts/ tree and this file
+# cannot drift, and so `--list` is the complete index of layouts.
 #
 # This is the single list of boards this bootloader fork owns the memory map
 # for. Applications (CircuitPython, Arduino, Wippersnapper) consume the
@@ -164,6 +172,52 @@ vendor = "raspberrypi"
 mcuboot = false
 
 [boards.stm32h750b_dk]
-board = "stm32h750b_dk"
+# The ext_flash_app qualifier is the build the fork (and CircuitPython) use:
+# it puts the app's XIP code and the partitioned flash on the QSPI NOR. The
+# internal flash hosts the bootloader alone (see the planner's mcuboot-only
+# internal topology).
+board = "stm32h750b_dk/stm32h750xx/ext_flash_app"
 vendor = "st"
+
+[boards.adafruit_clue_nrf52840]
+# UF2 variant: the CLUE boots from the Adafruit nRF52 bootloader on top of
+# the SoftDevice. The layout owns the app-side partitions (code/storage/nvm
+# on internal flash, the whole 2 MB GD25Q16 SPI NOR as the user filesystem)
+# and leaves the variant-dependent SoftDevice/UF2 regions to the upstream
+# board dtsi (see dts/adafruit/adafruit_clue_nrf52840.dtsi).
+board = "adafruit_clue_nrf52840/nrf52840/uf2"
+vendor = "adafruit"
+mcuboot = false
+
+[boards.adafruit_feather_nrf52840]
+# UF2 variants (base + sense): same shape as the CLUE -- the layout owns the
+# app-side partitions (code/storage/nvm on internal flash, the whole 2 MB
+# GD25Q16 SPI NOR as the user filesystem) and leaves the variant-dependent
+# SoftDevice/UF2 regions to the upstream board dtsi (see
+# dts/adafruit/adafruit_feather_nrf52840.dtsi).
+board = "adafruit_feather_nrf52840/nrf52840/uf2"
+vendor = "adafruit"
+mcuboot = false
+
+[boards.native_sim]
+# Host simulation (native_sim/native): no real flash, the layout just shapes
+# upstream's simulated flash for the port (see dts/native/native_sim.dtsi).
+board = "native_sim/native"
+vendor = "native"
+mcuboot = false
+
+[boards.nrf5340bsim]
+# Host simulation (nrf5340bsim/nrf5340/cpuapp): no real flash, the layout just
+# shapes upstream's simulated flash for the port (see
+# dts/native/nrf5340bsim.dtsi).
+board = "nrf5340bsim/nrf5340/cpuapp"
+vendor = "native"
+mcuboot = false
+
+[boards.nrf54lm20bsim]
+# Host simulation (nrf54lm20bsim/nrf54lm20a/cpuapp): no real flash, the layout
+# just shapes upstream's simulated RRAM for the port (see
+# dts/native/nrf54lm20bsim.dtsi).
+board = "nrf54lm20bsim/nrf54lm20a/cpuapp"
+vendor = "native"
 mcuboot = false

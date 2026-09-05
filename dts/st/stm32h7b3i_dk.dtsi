@@ -1,4 +1,20 @@
 /* Delete Zephyr-default partitions before redefining them. */
 &mx25lm51245 { /delete-node/ partitions; };
 
+/* Enable the OTG HS controller for the bootloader's UF2 drive. The board
+ * overlay in the application enables it as well; this keeps the bootloader
+ * image self-contained (USBD_DEVICE_DEFINE links against the node's device).
+ */
+zephyr_udc0: &usbotg_hs {
+	pinctrl-0 = <&usb_otg_hs_dm_pa11 &usb_otg_hs_dp_pa12>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/ {
+	aliases {
+		mcuboot-button0 = &user_button;
+	};
+};
+
 #include "stm32h7b3i_dk-partitions.dtsi"

@@ -1,0 +1,59 @@
+/* Feather nRF52840 UF2 layout (no mcuboot): applied to the application image
+ * only. Also covers the sense variant: the layout is keyed on the bare board
+ * name, so both uf2 qualifiers get it.
+ *
+ * The Feather boots from the Adafruit nRF52 bootloader (UF2) on top of the
+ * SoftDevice, so there is no mcuboot domain. The fork still owns this layout
+ * so CircuitPython, Arduino, and Wippersnapper share the same code/nvm/storage
+ * placement. Flash is 1 MB on the nRF52840.
+ *
+ * The SoftDevice reservation and the UF2 bootloader region are deliberately
+ * not redefined here: they are variant-dependent (each
+ * adafruit_feather_nrf52840 variant includes a different SoftDevice dtsi) and
+ * this overlay is applied to every variant of the board. Only the upstream
+ * partitions this layout replaces are deleted; the bootloader-owned regions
+ * pass through untouched.
+ *
+ * The internal flash hosts only app-side partitions (code/storage/nvm); the
+ * Feather's entire 2 MB GD25Q16 SPI NOR is the user filesystem (the board has
+ * native USB, so the node label is fatfs_partition).
+ */
+&gd25q16 {
+	/delete-node/ partitions;
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		fatfs_partition: partition@0 {
+			label = "filesystem";
+			reg = <0x0 DT_SIZE_M(2)>;
+		};
+	};
+};
+
+/delete-node/ &code_partition;
+/delete-node/ &storage_partition;
+
+&flash0 {
+	partitions {
+		code_partition: partition@26000 {
+			compatible = "zephyr,mapped-partition";
+			label = "code-partition";
+			reg = <0x00026000 0x000c4000>;
+		};
+
+		storage_partition: partition@ea000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x000ea000 0x00008000>;
+		};
+
+		nvm_partition: partition@f2000 {
+			compatible = "zephyr,mapped-partition";
+			label = "nvm";
+			reg = <0x000f2000 0x00002000>;
+		};
+	};
+};
