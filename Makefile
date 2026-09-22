@@ -54,6 +54,12 @@ UF2_BOARDS ?= $(shell python3 $(ADABOOT_DIR)/tools/uf2_updater.py list)
 ifdef BOARD
 WEST_BOARD := $($(BOARD)_BOARD)
 OVERLAY    := $(ADABOOT_DIR)/$($(BOARD)_DTSI)
+# Applied after the layout for bootloader-image builds (make build, menuconfig):
+# dts/app-partition.overlay (applied with the layout by dts/sysbuild.cmake)
+# selects the application slot (zephyr,code-partition = &slot0) for application
+# images; the bootloader links into boot_partition instead. Not for the
+# updater, which is an application and selects slot0 via its own app.overlay.
+BOOT_IMAGE_OVERLAY := $(ADABOOT_DIR)/dts/boot-partition.overlay
 # Optional board-specific conf fragment (conf/<key>.conf), empty if absent.
 # Hand-maintained board opt-ins (UF2, serial, retention).
 BOARD_CONF := $(wildcard $(CONF_DIR)/$(BOARD).conf)
@@ -158,7 +164,9 @@ update: $(WORKSPACE_MANIFEST)
 #
 # The board's partition layout (dts/<vendor>/<board>.dtsi) is applied via
 # EXTRA_DTC_OVERLAY_FILE (after boot/zephyr's app.overlay, which sets the
-# bootloader code partition). Adaboot defaults (signature-none, SPI_NOR) come
+# bootloader code partition -- as does the boot-partition overlay appended
+# after the layout, since application images get the slot0 selection from
+# dts/app-partition.overlay instead). Adaboot defaults (signature-none, SPI_NOR) come
 # from conf/adaboot.conf; board-specific opt-ins layer on top. The upgrade
 # mode is chosen by Kconfig from the layout (slot1 -> swap). This repo is the
 # Zephyr module (live tree) via
@@ -170,7 +178,7 @@ build:
 	@echo "==> Building $(BOARD) (Zephyr board $(WEST_BOARD))"
 	$(WEST) build -b $(WEST_BOARD) -d $(BUILD) $(ADABOOT_DIR)/boot/zephyr -- \
 	  -DEXTRA_ZEPHYR_MODULES=$(ADABOOT_DIR) \
-	  -DEXTRA_DTC_OVERLAY_FILE=$(OVERLAY) \
+	  -DEXTRA_DTC_OVERLAY_FILE="$(OVERLAY);$(BOOT_IMAGE_OVERLAY)" \
 	  -DEXTRA_CONF_FILE="$(BOOT_CONF_FILE)"
 	@python3 $(ADABOOT_DIR)/tools/boot_partition_bin.py $(BUILD)
 	@-cp $(BUILD)/zephyr/zephyr.hex $(BUILD)/mcuboot.hex 2>/dev/null || true
@@ -244,7 +252,7 @@ menuconfig:
 	@if [ -z "$(WEST_BOARD)" ]; then echo "Unknown board '$(BOARD)'; see 'make list'."; false; fi
 	$(WEST) build -b $(WEST_BOARD) -d $(BUILD) $(ADABOOT_DIR)/boot/zephyr --target menuconfig -- \
 	  -DEXTRA_ZEPHYR_MODULES=$(ADABOOT_DIR) \
-	  -DEXTRA_DTC_OVERLAY_FILE=$(OVERLAY) \
+	  -DEXTRA_DTC_OVERLAY_FILE="$(OVERLAY);$(BOOT_IMAGE_OVERLAY)" \
 	  -DEXTRA_CONF_FILE="$(BOOT_CONF_FILE)"
 
 flash:

@@ -1,0 +1,18 @@
+/* Bootloader-image code-partition override.
+ *
+ * The application image links into the primary slot the bootloader boots
+ * (dts/app-partition.overlay, applied with the layout, points
+ * /chosen/zephyr,code-partition at &slot0_partition for it). The bootloader
+ * image itself must not -- it links into its own boot_partition.
+ *
+ * This overlay makes that selection and is applied AFTER the layout
+ * (dts/sysbuild.cmake for sysbuild builds, the Makefile's bootloader targets
+ * for standalone ones), so it wins over both the layout and boot/zephyr's
+ * own app.overlay. That app.overlay keeps the same assignment for builds
+ * that apply no layout at all.
+ */
+/ {
+	chosen {
+		zephyr,code-partition = &boot_partition;
+	};
+};

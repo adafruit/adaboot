@@ -68,6 +68,17 @@ sysbuild applies the overlay to the application image and, when the board boots
 via mcuboot, to the bootloader image as well, with `SB_CONFIG_BOOTLOADER_MCUBOOT`
 and friends already defaulted.
 
+The layout also selects where each image links: `dts/sysbuild.cmake` applies
+`dts/app-partition.overlay` with the layout, pointing
+`/chosen/zephyr,code-partition` at `slot0_partition` for the application image
+of every board that boots via mcuboot, so the application builds into the
+primary slot without any board overlay of its own (Zephyr selects
+`USE_DT_CODE_PARTITION` for chain-loaded images, so the property takes
+effect). The bootloader image must not link there, so `dts/sysbuild.cmake`
+(and the Makefile's standalone bootloader targets) apply
+`dts/boot-partition.overlay` *after* the layout, re-pointing the property at
+`boot_partition` for the mcuboot image.
+
 The pieces, all reached through `zephyr/module.yml`:
 
 | file                       | role                                                              |

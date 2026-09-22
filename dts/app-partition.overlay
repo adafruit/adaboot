@@ -1,0 +1,20 @@
+/* Application-image code-partition selection.
+ *
+ * The board layouts in dts/<vendor>/<board>.dtsi define the shared memory map
+ * (boot_partition, slot0_partition, ...) but stay silent about which image
+ * links where: that choice is per-image, not per-board, so it lives here
+ * instead of being repeated in every layout. dts/sysbuild.cmake applies this
+ * overlay to the application image of every board that boots via mcuboot,
+ * pointing /chosen/zephyr,code-partition at the primary slot the bootloader
+ * boots (Zephyr selects USE_DT_CODE_PARTITION for chain-loaded images, so
+ * the property takes effect).
+ *
+ * The bootloader image gets the mirror-image treatment instead:
+ * dts/boot-partition.overlay, applied after the layout, links it into
+ * boot_partition.
+ */
+/ {
+	chosen {
+		zephyr,code-partition = &slot0_partition;
+	};
+};
