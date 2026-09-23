@@ -5,7 +5,60 @@
 / {
 	aliases {
 		mcuboot-button0 = &button0;
+		mcuboot-led0 = &led1;
 	};
 };
 
 #include "ek_ra6m5-partitions.dtsi"
+
+/* Bootloader info shared-data area: the last KB of this board's RAM, kept
+ * out of the managed RAM so neither image clobbers it. The bootloader
+ * writes its boot state here on every boot (BOOT_SHARE_DATA_BOOTINFO ->
+ * BLINFO TLVs via boot_write_shared_data()); the application reads the
+ * same region to answer the SMP bootloader-info command (RETENTION_
+ * BOOTLOADER_INFO_TYPE_MCUBOOT). Carved here because this dtsi applies to
+ * both images.
+ *
+ * A second, one-byte retention cell in the same block backs the boot-mode
+ * flag (zephyr,boot-mode): the application sets it to request the
+ * bootloader's update mode (reset_to_bootloader() / RunMode.UF2) and the
+ * bootloader reads and clears it at boot (io_detect_boot_mode()). SRAM
+ * content survives the warm reset that follows the request, which is all a
+ * button-less entrance needs; a power cycle simply drops the request.
+ */
+&sram0 {
+	reg = <0x20000000 0x7fc00>;
+};
+
+/ {
+	chosen {
+		zephyr,bootloader-info = &boot_info0;
+		zephyr,boot-mode = &boot_mode0;
+	};
+
+	boot_info_sram: sram@2007fc00 {
+		compatible = "zephyr,memory-region", "mmio-sram";
+		reg = <0x2007fc00 0x400>;
+		zephyr,memory-region = "BOOT_INFO_SRAM";
+		status = "okay";
+
+		retainedmem {
+			compatible = "zephyr,retained-ram";
+			status = "okay";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			boot_info0: boot_info@0 {
+				compatible = "zephyr,retention";
+				status = "okay";
+				reg = <0x0 0x100>;
+			};
+
+			boot_mode0: boot_mode@100 {
+				compatible = "zephyr,retention";
+				status = "okay";
+				reg = <0x100 0x1>;
+			};
+		};
+	};
+};

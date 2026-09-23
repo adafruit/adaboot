@@ -14,58 +14,42 @@
 		compatible = "fixed-partitions";
 		#address-cells = <1>;
 		#size-cells = <1>;
-
-		/* 0x0-0x30000 reserved for IronSide SE */
+		ranges;
 
 		boot_partition: partition@30000 {
+			compatible = "zephyr,mapped-partition";
 			label = "mcuboot";
 			reg = <0x30000 DT_SIZE_K(128)>;
 		};
 
 		slot0_partition: partition@50000 {
+			compatible = "zephyr,mapped-partition";
 			label = "image-0";
 			reg = <0x50000 DT_SIZE_K(1344)>;
 		};
 
-		storage_partition: partition@1f8000 {
-			label = "storage";
-			reg = <0x1f8000 DT_SIZE_K(32)>;
-		};
-
 		cpuppr_code_partition: partition@e4000 {
+			compatible = "zephyr,mapped-partition";
+			label = "cpuppr_code_partition";
 			reg = <0xe4000 DT_SIZE_K(64)>;
 		};
 
 		cpuflpr_code_partition: partition@f4000 {
+			compatible = "zephyr,mapped-partition";
+			label = "cpuflpr_code_partition";
 			reg = <0xf4000 DT_SIZE_K(48)>;
 		};
 
 		netcore_partition: partition@1a0000 {
+			compatible = "zephyr,mapped-partition";
 			label = "image-2";
 			reg = <0x1a0000 DT_SIZE_K(352)>;
 		};
-	};
-};
 
-&mx25uw63 {
-	partitions {
-		compatible = "fixed-partitions";
-		#address-cells = <1>;
-		#size-cells = <1>;
-
-		nvm_partition: partition@0 {
-			label = "nvm";
-			reg = <0x0 DT_SIZE_K(4)>;
-		};
-
-		slot1_partition: partition@1000 {
-			label = "image-1";
-			reg = <0x1000 DT_SIZE_K(1348)>;
-		};
-
-		fatfs_partition: partition@152000 {
-			label = "filesystem";
-			reg = <0x152000 DT_SIZE_K(6840)>;
+		storage_partition: partition@1f8000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x1f8000 DT_SIZE_K(32)>;
 		};
 	};
 };

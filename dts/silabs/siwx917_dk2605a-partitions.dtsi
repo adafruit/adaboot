@@ -9,20 +9,21 @@
  * this file.
  */
 
-/delete-node/ &code_partition;
-
 &flash0 {
 	partitions {
-		boot_partition: partition@202000 {
-			compatible = "zephyr,mapped-partition";
-			label = "mcuboot";
-			reg = <0x202000 DT_SIZE_K(128)>;
-		};
 
-		slot0_partition: code_partition: partition@222000 {
-			compatible = "zephyr,mapped-partition";
-			label = "image-0";
-			reg = <0x222000 DT_SIZE_K(1880)>;
-		};
+		/* Inherited from the upstream board dts and kept as-is
+		 * (not re-emitted here):
+		 *   mbr_nwp (mbr_nwp_partition): 0x0 + DT_SIZE_K(68)
+		 *   code_nwp (code_nwp_partition): 0x11000 + DT_SIZE_K(1916)
+		 *   mbr (mbr_partition): 0x1f0000 + DT_SIZE_K(68)
+		 *   hdr (hdr_partition): 0x201000 + DT_SIZE_K(4)
+		 *   mcuboot (boot_partition): 0x202000 + DT_SIZE_K(128)
+		 *   image-0 (slot0_partition): 0x222000 + DT_SIZE_K(1880)
+		 *   ota_swap (ota_swap_partition): 0x400000 + DT_SIZE_K(3900)
+		 *   storage_nwp (storage_nwp_partition): 0x7cf000 + DT_SIZE_K(160)
+		 *   storage_shared (storage_shared_partition): 0x7f7000 + DT_SIZE_K(20)
+		 *   backup_bootloader (backup_bootloader_partition): 0x7fc000 + DT_SIZE_K(16)
+		 */
 	};
 };

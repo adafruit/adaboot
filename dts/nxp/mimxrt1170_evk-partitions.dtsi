@@ -12,22 +12,29 @@
 &is25wp128 {
 	partitions {
 
-		storage_partition: partition@e20000 {
+		/* Inherited from the upstream board dts and kept as-is
+		 * (not re-emitted here):
+		 *   mcuboot (boot_partition): 0x0 + DT_SIZE_K(128)
+		 *   image-0 (slot0_partition): 0x20000 + DT_SIZE_M(2)
+		 *   image-1 (slot1_partition): 0x720000 + DT_SIZE_M(2)
+		 */
+
+		storage_partition: partition@920000 {
 			compatible = "zephyr,mapped-partition";
 			label = "storage";
-			reg = <0xe20000 DT_SIZE_K(32)>;
+			reg = <0x920000 DT_SIZE_K(32)>;
 		};
 
-		nvm_partition: partition@e28000 {
+		nvm_partition: partition@928000 {
 			compatible = "zephyr,mapped-partition";
 			label = "nvm";
-			reg = <0xe28000 DT_SIZE_K(4)>;
+			reg = <0x928000 DT_SIZE_K(4)>;
 		};
 
-		fatfs_partition: partition@e29000 {
+		fatfs_partition: partition@929000 {
 			compatible = "zephyr,mapped-partition";
 			label = "filesystem";
-			reg = <0xe29000 DT_SIZE_K(1884)>;
+			reg = <0x929000 DT_SIZE_K(7004)>;
 		};
 	};
 };

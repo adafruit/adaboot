@@ -22,12 +22,13 @@
  *   - Before writing, the boot partition is read back and compared to the
  *     embedded image. If they already match the write (and erase) is skipped,
  *     so re-running the updater is harmless.
- *   - After a successful write, if the board has a zephyr,boot-mode retention
- *     area (CONFIG_RETENTION_BOOT_MODE), the updater sets it to "bootloader"
- *     before rebooting. The freshly-written bootloader then enters its
- *     serial/UF2 recovery mode instead of booting the updater again, so the
- *     user can reflash their real application. On boards without that
- *     retention area the call is a no-op and the device reboots normally.
+ *   - After a successful write, the updater asks the bootloader for its
+ *     update mode before rebooting (adaboot_request_update_mode(), which
+ *     sets the boot-mode retention flag where CONFIG_RETENTION_BOOT_MODE is
+ *     available). The freshly-written bootloader then enters its serial/UF2
+ *     recovery mode instead of booting the updater again, so the user can
+ *     reflash their real application. On boards with no request mechanism
+ *     the call is a no-op and the device reboots normally.
  */
 
 #include <zephyr/kernel.h>
@@ -37,9 +38,7 @@
 #include <zephyr/sys/reboot.h>
 #include <zephyr/logging/log.h>
 
-#if IS_ENABLED(CONFIG_RETENTION_BOOT_MODE)
-#include <zephyr/retention/bootmode.h>
-#endif
+#include "adaboot/update_mode.h"
 
 #include <errno.h>
 #include <string.h>
@@ -216,16 +215,11 @@ int main(void)
         LOG_INF("bootloader updated successfully");
     }
 
-#if IS_ENABLED(CONFIG_RETENTION_BOOT_MODE)
-    rc = bootmode_set(BOOT_MODE_TYPE_BOOTLOADER);
-    if (rc != 0) {
-        LOG_WRN("bootmode_set failed: %d (rebooting normally)", rc);
-    } else {
-        LOG_INF("requested bootloader recovery on next boot");
-    }
-#else
-    LOG_INF("no boot-mode retention; rebooting (reflash your app to leave the updater)");
-#endif
+    /* Ask the freshly written bootloader for its update mode, so the next
+     * boot waits for new firmware instead of running this updater again.
+     * A no-op on boards with no request mechanism.
+     */
+    adaboot_request_update_mode(true);
 
     LOG_INF("rebooting");
     sys_reboot(SYS_REBOOT_COLD);

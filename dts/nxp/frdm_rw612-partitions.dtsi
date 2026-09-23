@@ -12,22 +12,29 @@
 &w25q512jvfiq {
 	partitions {
 
-		storage_partition: partition@620000 {
+		/* Inherited from the upstream board dts and kept as-is
+		 * (not re-emitted here):
+		 *   mcuboot (boot_partition): 0x0 + DT_SIZE_K(128)
+		 *   image-0 (slot0_partition): 0x20000 + DT_SIZE_M(2)
+		 *   image-1 (slot1_partition): 0x320000 + DT_SIZE_M(2)
+		 */
+
+		storage_partition: partition@520000 {
 			compatible = "zephyr,mapped-partition";
 			label = "storage";
-			reg = <0x620000 DT_SIZE_K(32)>;
+			reg = <0x520000 DT_SIZE_K(32)>;
 		};
 
-		nvm_partition: partition@628000 {
+		nvm_partition: partition@528000 {
 			compatible = "zephyr,mapped-partition";
 			label = "nvm";
-			reg = <0x628000 DT_SIZE_K(4)>;
+			reg = <0x528000 DT_SIZE_K(4)>;
 		};
 
-		fatfs_partition: partition@629000 {
+		fatfs_partition: partition@529000 {
 			compatible = "zephyr,mapped-partition";
 			label = "filesystem";
-			reg = <0x629000 DT_SIZE_K(59228)>;
+			reg = <0x529000 DT_SIZE_K(60252)>;
 		};
 	};
 };

@@ -218,6 +218,9 @@ config BOOT_ERASE_PROGRESSIVELY
 
 config BOOT_MGMT_ECHO
 	bool "Echo command"
+	# Universally enabled: a tiny SMP OS-group command, and the standard
+	# connectivity check update tools make when talking to a device.
+	default y
 	help
 	  if enabled, support for the mcumgr echo command is being added.
 
@@ -234,6 +237,9 @@ config BOOT_MGMT_MCUMGR_PARAMS
 
 config BOOT_MGMT_BOOTLOADER_INFO
 	bool "Bootloader information command"
+	# Universally enabled: lets any SMP client identify the bootloader
+	# (name, mode, active slot) before or instead of an update.
+	default y
 	help
 	  If enabled, support for the mcumgr OS group "Bootloader information"
 	  command (command ID 8) is added, mirroring the command provided by

@@ -38,6 +38,8 @@
 
 #include "do_boot.h"
 
+#include <zephyr/retention/bootmode.h>
+
 #ifdef MCUBOOT_SERIAL_INACTIVITY_TIMEOUT
 #include <zephyr/sys/reboot.h>
 #endif
@@ -191,6 +193,17 @@ void zephyr_boot_log_stop(void)
     || defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP) \
     || defined(CONFIG_MCUBOOT_UF2_NO_APPLICATION)
 #define MCUBOOT_UPDATE_MODE_ENTERED
+#endif
+
+/* Is there a boot-time wait window at all? One single window covers every
+ * entrance that needs waiting for: the double reset (retention flag) and the
+ * serial DFU wait (BOOT_SERIAL_WAIT_FOR_DFU) used to be two sequential waits;
+ * see boot_wait_for_update(). Boards without either keep the previous
+ * instant-entrance checks (and the application boot-mode request check
+ * further down in main()). */
+#if defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP) || defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP) \
+    || defined(CONFIG_BOOT_SERIAL_WAIT_FOR_DFU)
+#define MCUBOOT_UPDATE_WAIT_WINDOW
 #endif
 
 #if defined(MCUBOOT_UPDATE_MODE_COMBINED) && defined(MCUBOOT_UPDATE_MODE_ENTERED)
@@ -424,6 +437,147 @@ static void boot_serial_enter(int inactivity_in_ms)
 }
 #endif
 
+#if defined(MCUBOOT_UPDATE_WAIT_WINDOW)
+
+#if defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP)
+#define DOUBLE_TAP_DELAY_MS CONFIG_MCUBOOT_UF2_DOUBLE_TAP_DELAY
+#elif defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP)
+#define DOUBLE_TAP_DELAY_MS CONFIG_BOOT_SERIAL_DOUBLE_TAP_DELAY
+#endif
+
+/*
+ * The single boot-time wait window. Every "user asks for the bootloader"
+ * input is served by the same wait, instead of a reset-entrance window
+ * followed by a separate serial DFU wait:
+ *
+ * - a button press (GPIO entrance, held or pressed during the window),
+ * - a pin reset,
+ * - a double reset: the boot-mode flag is set here and read by the next
+ *   boot, so a reset that lands inside the window enters update mode,
+ * - an application boot-mode request (the flag the app set before it
+ *   rebooted) -- enters immediately, no window latency,
+ * - with serial recovery, the first incoming mcumgr command
+ *   (BOOT_SERIAL_WAIT_FOR_DFU).
+ *
+ * Mirrors Adafruit_nRF52_Bootloader, which also waits once
+ * (DFU_DBL_RESET_DELAY) and serves DFU from the same window. When the
+ * window expires, the flag is cleared and boot proceeds normally.
+ */
+static void boot_wait_for_update(void)
+{
+    int window_ms = 0;
+
+#if defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP) || defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP)
+    window_ms = MAX(window_ms, (int)DOUBLE_TAP_DELAY_MS);
+#endif
+#ifdef CONFIG_BOOT_SERIAL_WAIT_FOR_DFU
+    window_ms = MAX(window_ms, CONFIG_BOOT_SERIAL_WAIT_FOR_DFU_TIMEOUT);
+#endif
+    if (window_ms <= 0) {
+        return;
+    }
+
+    /* Entrances that can be checked without waiting: the entrance button
+     * held at boot (with debounce), a pin reset, and a boot-mode flag left
+     * behind -- by the application before it rebooted, or by a reset that
+     * landed inside a previous boot's window. */
+#ifdef CONFIG_MCUBOOT_UF2_ENTRANCE_GPIO
+    if (io_detect_pin() && !io_boot_skip_serial_recovery()) {
+        BOOT_LOG_DBG("Entrance button held, entering UF2 mode");
+        boot_uf2_enter();
+    }
+#endif
+#ifdef CONFIG_BOOT_SERIAL_ENTRANCE_GPIO
+    if (io_detect_pin() && !io_boot_skip_serial_recovery()) {
+        BOOT_LOG_DBG("Entrance button held, entering serial recovery");
+        boot_serial_enter(0);
+    }
+#endif
+#ifdef CONFIG_BOOT_SERIAL_PIN_RESET
+    if (io_detect_pin_reset()) {
+        boot_serial_enter(0);
+    }
+#endif
+#if defined(CONFIG_MCUBOOT_UF2_ENTRANCE_BOOT_MODE)
+    if (io_detect_boot_mode()) {
+        boot_uf2_enter();
+    }
+#elif defined(CONFIG_BOOT_SERIAL_BOOT_MODE)
+    if (io_detect_boot_mode()) {
+        boot_serial_enter(0);
+    }
+#endif
+
+#if defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP) || defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP)
+    /* Register this boot as a first reset: if the device is reset during
+     * the window, the next boot finds the flag set and enters update mode. */
+    bootmode_set(BOOT_MODE_TYPE_BOOTLOADER);
+#endif
+
+#ifdef CONFIG_BOOT_SERIAL_WAIT_FOR_DFU
+    /* Bring up the recovery console before image selection, so an mcumgr
+     * command sent while boot_go() validates the image is already buffered. */
+    int rc = boot_console_init();
+    if (rc != 0) {
+        BOOT_LOG_DBG("Error initializing boot console, rc = %d", rc);
+    }
+#endif
+
+    BOOT_LOG_DBG("Waiting up to %d ms for an update request", window_ms);
+    uint32_t start = k_uptime_get_32();
+
+#ifdef MCUBOOT_SERIAL_INACTIVITY_TIMEOUT
+    /* No slicing: the inactivity countdown must survive across the window,
+     * so hand the whole wait to one call; the button is only checked above. */
+    if (boot_serial_start_inactivity(&boot_funcs, window_ms,
+                                     MCUBOOT_SERIAL_INACTIVITY_TIMEOUT)) {
+        BOOT_LOG_INF("Serial recovery idle for %d ms, resetting",
+                     MCUBOOT_SERIAL_INACTIVITY_TIMEOUT);
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+        io_led_set(0);
+#endif
+        ZEPHYR_BOOT_LOG_STOP();
+        sys_reboot(SYS_REBOOT_COLD);
+    }
+#else
+    while ((int)(k_uptime_get_32() - start) < window_ms) {
+        MCUBOOT_WATCHDOG_FEED();
+
+#if defined(CONFIG_BOOT_SERIAL_ENTRANCE_GPIO) || defined(CONFIG_MCUBOOT_UF2_ENTRANCE_GPIO)
+        /* The button also enters when pressed during the window, not just
+         * when held at boot. */
+        if (io_button_pressed()) {
+            BOOT_LOG_DBG("Entrance button pressed during the wait window");
+#if defined(CONFIG_MCUBOOT_UF2_ENTRANCE_GPIO)
+            boot_uf2_enter();
+#elif defined(CONFIG_BOOT_SERIAL_ENTRANCE_GPIO)
+            boot_serial_enter(0);
+#endif
+        }
+#endif
+
+#ifdef CONFIG_BOOT_SERIAL_WAIT_FOR_DFU
+        /* 10 ms slices: poll the button between console reads. A received
+         * mcumgr command serves the whole update inside the call and never
+         * returns. */
+        int elapsed = (int)(k_uptime_get_32() - start);
+        boot_serial_check_start(&boot_funcs, MIN(10, window_ms - elapsed));
+#elif defined(CONFIG_MULTITHREADING)
+        k_sleep(K_MSEC(1));
+#else
+        k_busy_wait(1000);
+#endif
+    }
+#endif
+
+#if defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP) || defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP)
+    /* Window expired: no double reset. Clear the flag so this boot and any
+     * later reset boot normally. */
+    bootmode_clear();
+#endif
+}
+#endif /* MCUBOOT_UPDATE_WAIT_WINDOW */
+
 int main(void)
 {
     struct boot_rsp rsp;
@@ -446,6 +600,13 @@ int main(void)
 #ifdef CONFIG_MCUBOOT_INDICATION_LED
     /* LED init */
     io_led_init();
+#ifdef MCUBOOT_UPDATE_MODE_ENTERED
+    /* Fast fade from boot start through the wait window, like
+     * Adafruit_nRF52_Bootloader's STATE_BOOTLOADER_STARTED: the same tempo
+     * covers waiting for a reset and waiting for firmware, and the LED is
+     * turned off right before the application is started. */
+    io_led_blink(IO_LED_BLINK_WAIT_CYCLE_MS);
+#endif
 #endif
 
     os_heap_init();
@@ -464,6 +625,14 @@ int main(void)
     }
 #endif /* CONFIG_MCUBOOT_UUID_VID || CONFIG_MCUBOOT_UUID_CID */
 
+#ifdef MCUBOOT_UPDATE_WAIT_WINDOW
+    /* One wait covers every entrance: button, pin reset, double reset, the
+     * application's boot-mode request and the first mcumgr command (see
+     * boot_wait_for_update() above). */
+    boot_wait_for_update();
+#else
+    /* No wait window: instant entrance checks only. The application's
+     * boot-mode request is still honored after image selection below. */
 #ifdef CONFIG_BOOT_SERIAL_ENTRANCE_GPIO
     BOOT_LOG_DBG("Checking GPIO for serial recovery");
     if (io_detect_pin() &&
@@ -486,19 +655,6 @@ int main(void)
         boot_serial_enter(0);
     }
 #endif
-
-#ifdef CONFIG_BOOT_SERIAL_DOUBLE_TAP
-    BOOT_LOG_DBG("Checking double tap for serial recovery");
-    if (io_detect_double_tap()) {
-        boot_serial_enter(0);
-    }
-#endif
-
-#ifdef CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP
-    BOOT_LOG_DBG("Checking double tap for UF2 mode");
-    if (io_detect_double_tap()) {
-        boot_uf2_enter();
-    }
 #endif
 
 #if defined(CONFIG_BOOT_USB_DFU_GPIO)
@@ -546,22 +702,6 @@ int main(void)
     }
 #endif
 
-#ifdef CONFIG_BOOT_SERIAL_WAIT_FOR_DFU
-    /* Initialize the boot console, so we can already fill up our buffers while
-     * waiting for the boot image check to finish. This image check, can take
-     * some time, so it's better to reuse thistime to already receive the
-     * initial mcumgr command(s) into our buffers
-     */
-    rc = boot_console_init();
-    int timeout_in_ms = CONFIG_BOOT_SERIAL_WAIT_FOR_DFU_TIMEOUT;
-    uint32_t start = k_uptime_get_32();
-
-#ifdef CONFIG_MCUBOOT_INDICATION_LED
-    /* Fast fade while waiting for firmware */
-    io_led_blink(IO_LED_BLINK_WAIT_CYCLE_MS);
-#endif
-#endif
-
     BOOT_HOOK_GO_CALL_FIH(boot_go_hook, FIH_BOOT_HOOK_REGULAR, fih_rc, &rsp);
     if (FIH_EQ(fih_rc, FIH_BOOT_HOOK_REGULAR)) {
         FIH_CALL(boot_go, fih_rc, &rsp);
@@ -587,37 +727,6 @@ int main(void)
         BOOT_LOG_DBG("Entering UF2 mode via boot mode retention");
         boot_uf2_enter();
     }
-#endif
-
-#ifdef CONFIG_BOOT_SERIAL_WAIT_FOR_DFU
-    timeout_in_ms -= (k_uptime_get_32() - start);
-    if( timeout_in_ms <= 0 ) {
-        /* at least one check if time was expired */
-        timeout_in_ms = 1;
-    }
-#ifdef MCUBOOT_SERIAL_INACTIVITY_TIMEOUT
-    if (boot_serial_start_inactivity(&boot_funcs, timeout_in_ms,
-                                     MCUBOOT_SERIAL_INACTIVITY_TIMEOUT)) {
-        /* Reset rather than continue: boot_go() already selected an image
-         * before this window opened, so continuing would boot whatever the
-         * upload just replaced. A window with no command is not a session
-         * and boots as usual.
-         */
-        BOOT_LOG_INF("Serial recovery idle for %d ms, resetting",
-                     MCUBOOT_SERIAL_INACTIVITY_TIMEOUT);
-#ifdef CONFIG_MCUBOOT_INDICATION_LED
-        io_led_set(0);
-#endif
-        ZEPHYR_BOOT_LOG_STOP();
-        sys_reboot(SYS_REBOOT_COLD);
-    }
-#else
-    boot_serial_check_start(&boot_funcs,timeout_in_ms);
-#endif
-
-#ifdef CONFIG_MCUBOOT_INDICATION_LED
-    io_led_set(0);
-#endif
 #endif
 
     if (FIH_NOT_EQ(fih_rc, FIH_SUCCESS)) {
@@ -666,6 +775,12 @@ int main(void)
 #endif
 
     mcuboot_status_change(MCUBOOT_STATUS_BOOTABLE_IMAGE_FOUND);
+
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+    /* Dark before the application starts: it owns the LED from here, like
+     * Adafruit_nRF52_Bootloader's board_teardown() before the jump. */
+    io_led_set(0);
+#endif
 
     ZEPHYR_BOOT_LOG_STOP();
     do_boot(&rsp);

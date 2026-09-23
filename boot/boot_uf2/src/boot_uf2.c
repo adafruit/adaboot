@@ -12,6 +12,58 @@ void uf2_init(struct uf2_state *state, uint32_t max_blocks)
 	memset(state, 0, sizeof(*state) + (max_blocks + 7) / 8);
 }
 
+/* Scan a UF2 block's extension tags (flag UF2_FLAG_EXTENSION_TAGS) for
+ * one of @p tag_type. Records live right after the payload, each
+ * [size:1 (size byte + 3-byte type + payload)][type:3 LE][payload]
+ * padded to a 4-byte boundary, terminated by a 4-byte zero record (see
+ * the UF2 spec and the fork's uf2conv.py --ext, which pack the same
+ * layout).
+ *
+ * Returns the payload length and sets *payload to point into the
+ * block's data field when the tag is found; -1 when the block has no
+ * extension tags or the tag is absent; -2 when the tag region is
+ * malformed (truncated record, so any other tag's payload is
+ * untrustworthy too).
+ */
+static int uf2_find_ext_tag(const struct uf2_block *block, uint32_t tag_type,
+			    const uint8_t **payload)
+{
+	if (!(block->flags & UF2_FLAG_EXTENSION_TAGS)) {
+		return -1;
+	}
+
+	uint32_t off = block->payload_size;
+
+	while (off + 4 <= UF2_DATA_SIZE) {
+		uint8_t sz = block->data[off];
+
+		/* Terminator: size 0, type 0. */
+		if (sz == 0) {
+			return -1;
+		}
+
+		/* Malformed: need at least the 4-byte header, and the record
+		 * must fit in the data field.
+		 */
+		if (sz < 4 || off + sz > UF2_DATA_SIZE) {
+			return -2;
+		}
+
+		uint32_t type = (uint32_t)block->data[off + 1] |
+				((uint32_t)block->data[off + 2] << 8) |
+				((uint32_t)block->data[off + 3] << 16);
+		if (type == tag_type) {
+			*payload = &block->data[off + 4];
+			return (int)(sz - 4);
+		}
+
+		/* Advance past this padded record. */
+		off += ((uint32_t)sz + 3u) & ~3u;
+	}
+
+	return -2;
+}
+
 /* Region accessors. In multi-region mode (regions != NULL) they index the
  * region table; in legacy single-region mode there is exactly one region
  * described by flash_base/flash_size with ctx cb_ctx.
@@ -50,6 +102,12 @@ static int uf2_find_region(const struct uf2_cfg *cfg, uint32_t addr)
 	uint8_t num_regions = uf2_num_regions(cfg);
 
 	for (uint8_t i = 0; i < num_regions; i++) {
+		/* Only regions reachable by address participate; regions on
+		 * other flash devices overlap window 0 and are reachable via
+		 * their partition-name tag only. */
+		if (cfg->regions != NULL && !cfg->regions[i].address_routed) {
+			continue;
+		}
 		if (addr >= uf2_region_base(cfg, i) &&
 		    addr < uf2_region_base(cfg, i) + uf2_region_size(cfg, i)) {
 			return i;
@@ -97,6 +155,77 @@ static int erase_up_to(const struct uf2_cfg *cfg, struct uf2_state *state,
 	return 0;
 }
 
+/* Find the writable region whose label matches @p label.
+ *
+ * @return Region index, or -1 if no named region matches.
+ */
+static int uf2_find_region_by_label(const struct uf2_cfg *cfg,
+				    const uint8_t *label, int label_len)
+{
+	uint8_t num_regions = uf2_num_regions(cfg);
+
+	for (uint8_t i = 0; i < num_regions; i++) {
+		const char *region_label =
+			(cfg->regions != NULL) ? cfg->regions[i].label : NULL;
+		size_t region_len;
+
+		if (region_label == NULL) {
+			continue;
+		}
+		region_len = strlen(region_label);
+		if (region_len == (size_t)label_len &&
+		    memcmp(region_label, label, label_len) == 0) {
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+/* Route the block to its writable region. By default that is the region
+ * containing the block's absolute target address; when the block carries
+ * a partition-name extension tag, the named region must exist and contain
+ * the address -- a disagreement between the generator's addressing and
+ * the bootloader's is rejected here instead of silently corrupting
+ * whichever partition the address happens to reach.
+ */
+static int uf2_route_block(const struct uf2_cfg *cfg,
+			   const struct uf2_block *block)
+{
+	const uint8_t *part_name;
+	int part_name_len = uf2_find_ext_tag(block, UF2_EXT_TAG_PARTITION,
+					     &part_name);
+	int region;
+
+	if (part_name_len == -2) {
+		return -1; /* Malformed tag region */
+	}
+
+	if (part_name_len >= 0) {
+		region = uf2_find_region_by_label(cfg, part_name, part_name_len);
+		if (region < 0) {
+			/* Unknown partition name: reject rather than route by
+			 * address, so a stale/mistargeted file can't write
+			 * anywhere unexpected. */
+			return -1;
+		}
+		/* The named region must contain the target address too: the
+		 * tag guards the address scheme, it doesn't replace it. */
+		if (block->target_addr < uf2_region_base(cfg, region) ||
+		    block->target_addr >=
+		    uf2_region_base(cfg, region) + uf2_region_size(cfg, region)) {
+			return -1;
+		}
+		return region;
+	}
+
+	region = uf2_find_region(cfg, block->target_addr);
+	if (region < 0) {
+		return -1; /* Outside every writable region */
+	}
+	return region;
+}
+
 int uf2_process_block(const struct uf2_cfg *cfg, struct uf2_state *state,
 		      const struct uf2_block *block, uint32_t max_blocks)
 {
@@ -128,46 +257,12 @@ int uf2_process_block(const struct uf2_cfg *cfg, struct uf2_state *state,
 	 * the family_id check but binds the image to a specific board variant.
 	 */
 	if (cfg->board_id != NULL && cfg->board_id[0] != '\0') {
-		size_t want_len = strlen(cfg->board_id);
-		bool match = false;
-
-		if (block->flags & UF2_FLAG_EXTENSION_TAGS) {
-			uint32_t off = block->payload_size;
-
-			while (off + 4 <= UF2_DATA_SIZE) {
-				uint8_t sz = block->data[off];
-
-				/* Terminator: size 0, type 0. */
-				if (sz == 0) {
-					break;
-				}
-
-				/* Malformed: need at least the 4-byte header,
-				 * and the record must fit in the data field.
-				 */
-				if (sz < 4 || off + sz > UF2_DATA_SIZE) {
-					break;
-				}
-
-				if (block->data[off + 1] == UF2_EXT_TAG_BOARD_ID_B0 &&
-				    block->data[off + 2] == UF2_EXT_TAG_BOARD_ID_B1 &&
-				    block->data[off + 3] == UF2_EXT_TAG_BOARD_ID_B2) {
-					uint8_t plen = (uint8_t)(sz - 4);
-
-					if (plen == want_len &&
-					    memcmp(&block->data[off + 4],
-					           cfg->board_id, want_len) == 0) {
-						match = true;
-					}
-					break; /* board tag found (match or not) */
-				}
-
-				/* Advance past this padded record. */
-				off += ((uint32_t)sz + 3u) & ~3u;
-			}
-		}
-
-		if (!match) {
+		const uint8_t *board_id;
+		int board_id_len = uf2_find_ext_tag(block, UF2_EXT_TAG_BOARD_ID,
+						    &board_id);
+		if (board_id_len < 0 ||
+		    board_id_len != (int)strlen(cfg->board_id) ||
+		    memcmp(board_id, cfg->board_id, board_id_len) != 0) {
 			return 0; /* Wrong board, silently ignore */
 		}
 	}
@@ -186,8 +281,7 @@ int uf2_process_block(const struct uf2_cfg *cfg, struct uf2_state *state,
 		return -1;
 	}
 
-	/* Route the block's absolute target address to a writable region */
-	int region = uf2_find_region(cfg, block->target_addr);
+	int region = uf2_route_block(cfg, block);
 
 	if (region < 0) {
 		return -1; /* Outside every writable region */

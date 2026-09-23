@@ -54,6 +54,24 @@ extern "C" {
 #define UF2_EXT_TAG_BOARD_ID_B1  ((UF2_EXT_TAG_BOARD_ID >> 8)  & 0xFFu) /* 0x7C */
 #define UF2_EXT_TAG_BOARD_ID_B2  ((UF2_EXT_TAG_BOARD_ID >> 16) & 0xFFu) /* 0x4D */
 
+/*
+ * Adaboot also defines a partition-name extension tag whose payload is
+ * the writable partition the block targets (e.g. "slot0" for the
+ * primary slot, "storage" for the filesystem partition). Blocks
+ * carry it so the bootloader can verify that the target address really
+ * lands in the partition the generator meant -- without it, a
+ * generator whose address scheme disagrees with the bootloader's would
+ * silently write into whichever partition its addresses happen to
+ * reach. The tag type is another random 24-bit choice outside the
+ * standard set; blocks without the tag keep routing by address alone,
+ * so generators predating it still work.
+ */
+#define UF2_EXT_TAG_PARTITION     0x1F0DA8u
+/* Type bytes in little-endian on-wire order (type 0x1F0DA8 -> A8 0D 1F). */
+#define UF2_EXT_TAG_PARTITION_B0 ((UF2_EXT_TAG_PARTITION >> 0)  & 0xFFu) /* 0xA8 */
+#define UF2_EXT_TAG_PARTITION_B1 ((UF2_EXT_TAG_PARTITION >> 8)  & 0xFFu) /* 0x0D */
+#define UF2_EXT_TAG_PARTITION_B2 ((UF2_EXT_TAG_PARTITION >> 16) & 0xFFu) /* 0x1F */
+
 /**
  * @brief UF2 block structure (512 bytes)
  */
@@ -82,6 +100,18 @@ struct uf2_region {
 	uint32_t base;  /* absolute flash address of the region start */
 	uint32_t size;  /* region size in bytes */
 	void *ctx;      /* opaque context passed to write/erase callbacks */
+	/* Partition name blocks may carry in an extension tag (see
+	 * UF2_EXT_TAG_PARTITION) to identify where they belong. NULL for
+	 * unnamed regions: tagged blocks naming this region are rejected. */
+	const char *label;
+	/* Whether the region is reachable by address-only routing. Regions on
+	 * the primary flash device are (window 0: plain device offsets);
+	 * regions on other devices are not, because their offset spaces
+	 * overlap the primary device's -- a block aimed at one could be
+	 * matched against the other's region. Such regions are only
+	 * reachable via their partition-name extension tag, and address
+	 * blocks at their natural device offset. */
+	bool address_routed;
 };
 
 /**

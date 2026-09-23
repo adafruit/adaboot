@@ -928,6 +928,10 @@ config BOOT_SHARE_BACKEND_AVAILABLE
 
 choice BOOT_SHARE_BACKEND
 	prompt "Shared data backend"
+	# Default to the retention backend on boards whose layout provides the
+	# zephyr,bootloader-info region (the fork's dtsi wires it for every
+	# Adaboot board), so the application can read the boot state.
+	default BOOT_SHARE_BACKEND_RETENTION if $(dt_chosen_enabled,$(DT_CHOSEN_BOOTLOADER_INFO))
 	default BOOT_SHARE_BACKEND_DISABLED
 
 config BOOT_SHARE_BACKEND_DISABLED
@@ -958,6 +962,7 @@ endchoice
 menuconfig BOOT_SHARE_DATA
 	bool "Save application specific data"
 	depends on BOOT_SHARE_BACKEND_AVAILABLE
+	default y
 	help
 	  This will allow data to be shared between MCUboot and an application,
 	  it does not include any informatiom by default.
@@ -969,6 +974,7 @@ menuconfig BOOT_SHARE_DATA
 config BOOT_SHARE_DATA_BOOTINFO
 	bool "Save boot information data"
 	depends on BOOT_SHARE_DATA
+	default y
 	help
 	  This will place information about the MCUboot configuration and
 	  running application into a shared memory area.
@@ -1112,7 +1118,7 @@ rsource "Kconfig.uf2"
 config MCUBOOT_INDICATION_LED
 	bool "Turns on LED indication when device is in DFU"
 	select GPIO
-	depends on MCUBOOT_SERIAL || BOOT_USB_DFU
+	depends on MCUBOOT_SERIAL || BOOT_USB_DFU || MCUBOOT_UF2
 	help
 	  Device device activates the LED while in bootloader mode.
 	  mcuboot-led0 alias must be set in the device's .dts

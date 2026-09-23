@@ -13,7 +13,41 @@
 # allow a second slot -- for boards with no wireless loading path, where the
 # filesystem gets the space instead (the fork's partitioning philosophy).
 #
+#
 # [boards.<key>] additionally supports:
+#
+# boot_size = 96               # Explicit bootloader partition size in KB.
+#                              # By default the boot partition is grown to at
+#                              # least 128 KB (rounded up to the erase-block
+#                              # size). Boards may pin a smaller size when the
+#                              # built bootloader leaves plenty of headroom;
+#                              # the value is aligned up to the erase-block
+#                              # size and the freed space goes to slot0.
+#
+# slot_size = 1536             # Explicit app-slot (slot0) size in KB for
+#                              # boards with a predefined mcuboot layout.
+#                              # When set, slot0 is pinned to exactly this
+#                              # size (aligned down to the erase-block
+#                              # size) instead of growing to SLOT0_MIN_SIZE
+#                              # (1 MB) or being capped at 2 MB; slot1 grows
+#                              # to stay symmetric so a swap still works. On
+#                              # boards whose slot0 fills the internal flash
+#                              # (slot1 moved to external flash), the pin can
+#                              # only shrink the fill result.
+#
+# filesystem_size = 1024       # Filesystem cap in KB for boards with a
+#                              # predefined mcuboot layout: the filesystem
+#                              # gets exactly this size and the two slots
+#                              # split the remaining free space, slot1 one
+#                              # erase sector larger than slot0 (the
+#                              # swap-using-offset scratch sector), instead
+#                              # of the filesystem filling whatever is left
+#                              # after SLOT0_MIN_SIZE-sized slots. Ignored
+#                              # when slot_size pins the slots explicitly.
+#
+# external_storage = true      # Put the Zephyr settings partition on the
+#                              # external flash (after slot1) instead of the
+#                              # internal tail, so slot0 grows into the space.
 #
 # [boards.<key>]
 # single_app = true            # plan a single-app layout (no image-1) even
@@ -45,10 +79,22 @@
 [boards.da14695_dk_usb]
 board = "da14695_dk_usb"
 vendor = "renesas"
+# Adaboot no longer fits the upstream 55 KB boot partition; 96 KB (aligned
+# to the erase-block size, starting at the ROM-loader offset 0x2400) leaves
+# it room to grow. The DA1's 4 MB flash is mostly app slot: cap the
+# filesystem at 1 MB and split the rest evenly between slot0 and slot1 for
+# the biggest swap-safe images.
+boot_size = 96
+filesystem_size = 1024
 
 [boards.ek_ra6m5]
 board = "ek_ra6m5"
 vendor = "renesas"
+# RA6 code flash programs in 128-byte blocks, too wide for MCUboot's
+# swap trailer alignment, so swap modes cannot run: plan an overwrite-only
+# layout and keep a secondary slot on the external QSPI NOR for
+# Ethernet-delivered updates.
+mcuboot_mode = "overwrite_only"
 
 [boards.ek_ra8d1]
 board = "ek_ra8d1"
@@ -104,6 +150,13 @@ erase_block_size = 4096
 [boards.nrf7002dk]
 board = "nrf7002dk/nrf5340/cpuapp"
 vendor = "nordic"
+
+# Adaboot builds to ~63 KB; 68 KB leaves a little room to grow. The rest
+# of the 1 MB internal flash goes to the app slot: CircuitPython's image
+# plus the embedded nRF70 firmware needs ~975 KB of it, so it cannot spare
+# the 32 KB settings tail either.
+boot_size = 68
+external_storage = true
 
 [boards.nrf7002dk.external_flash]
 label = "mx25r64"

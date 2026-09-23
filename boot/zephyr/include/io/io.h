@@ -70,6 +70,14 @@ void io_led_blink(uint32_t cycle_ms);
 bool io_detect_pin(void);
 
 /*
+ * One-shot read of the entrance button (no debounce). Polled by the
+ * entrance wait window between console reads.
+ *
+ * @retval	false not pressed, true pressed
+ */
+bool io_button_pressed(void);
+
+/*
  * Checks if board was reset using reset pin and if device should stay in
  * serial recovery mode
  *
@@ -84,14 +92,6 @@ bool io_detect_pin_reset(void);
  * @retval	false for normal boot, true for serial recovery boot
  */
 bool io_detect_boot_mode(void);
-
-/*
- * Checks for double tap of the reset button using the retention subsystem.
- * Optionally checks boot button during wait period if GPIO entrance is configured.
- *
- * @retval	false for normal boot, true for serial recovery boot
- */
-bool io_detect_double_tap(void);
 
 #ifdef CONFIG_SOC_FAMILY_NORDIC_NRF
 static inline bool io_boot_skip_serial_recovery()

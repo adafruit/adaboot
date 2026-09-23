@@ -118,7 +118,6 @@ FILL = {
     "storage": ("S", "storage (settings)"),
     "nvm": ("N", "nvm (non-volatile memory)"),
     "filesystem": ("#", "filesystem"),
-    "nrf70_fw": ("F", "nrf70 firmware"),
     "free": (".", "free / unallocated"),
 }
 
@@ -161,6 +160,28 @@ def load_boards_manifest():
             # this registry stay in sync, but the planner does not own their
             # (hand-maintained, mapped-partition) layout.
             "mcuboot": entry.get("mcuboot", True),
+            # Explicit bootloader partition size in KB. When set, the boot
+            # partition is pinned to exactly this size (aligned up to the
+            # erase-block size) instead of growing to the 128 KB floor.
+            "boot_size": entry.get("boot_size"),
+            # Explicit app-slot size in KB for boards with a predefined
+            # mcuboot layout. When set, slot0 is pinned to exactly this size
+            # (aligned down to the erase-block size) instead of growing to
+            # SLOT0_MIN_SIZE or being capped at 2 MB; slot1 grows to stay
+            # symmetric for swap.
+            "slot_size": entry.get("slot_size"),
+            # Filesystem size cap in KB for boards with a predefined mcuboot
+            # layout. When set, the filesystem partition gets exactly this
+            # size (aligned down to the erase-block size, never more than
+            # the free space) and slot0/slot1 split the remaining free space
+            # symmetrically, instead of the filesystem filling whatever is
+            # left after SLOT0_MIN_SIZE-sized slots. Ignored when slot_size
+            # pins the slots explicitly.
+            "filesystem_size": entry.get("filesystem_size"),
+            # Put the Zephyr settings partition on the external flash instead
+            # of the internal tail, so slot0 grows into the space. Only valid
+            # for boards whose layout moves slot1 to external flash.
+            "external_storage": entry.get("external_storage", False),
         }
     return boards
 
@@ -367,8 +388,7 @@ def extract_flash_devices(edt, flash_overrides=None):
 # --fix. Any other partition node label found in a previously generated
 # layout is carried forward unchanged: those are board-specific regions the
 # generic layout must keep (e.g. the nRF54H20's SoC-referenced VPR code
-# regions and its netcore firmware region, or nrf7002dk's nRF70 co-processor
-# firmware region).
+# regions and its netcore firmware region).
 MANAGED_NODE_LABELS = {
     "boot_partition",
     "slot0_partition",
@@ -676,14 +696,22 @@ def plan_partitions_predefined(
     deleted_devices=None,
     single_app=False,
     overwrite_only=False,
+    boot_size_kb=None,
+    slot_size_kb=None,
+    filesystem_size_kb=None,
+    external_storage=False,
 ):
     """Plan partitions for boards with a predefined mcuboot layout.
 
     When the predefined mcuboot layout is on internal flash and separate
     external flash is available, slot1 is moved to external flash and slot0
     is grown to fill the freed internal space:
-        Internal: mcuboot + slot0 (grown) + [nvm] + storage
-        External: [nvm] + slot1 (slot0 size + 1 max-erase sector) + filesystem
+        Internal: mcuboot + slot0 (grown) + [nvm] + [storage]
+        External: [nvm] + slot1 (slot0 size + 1 max-erase sector)
+                  + [storage] + filesystem
+    storage is dropped from the internal tail and appended to the external
+    flash (between slot1 and the carried partitions) when the board sets
+    ``external_storage`` in boards.toml.
 
     When there is no separate external flash -- or the mcuboot layout itself
     lives on the external (XIP) flash -- the upstream slots are kept as-is
@@ -710,15 +738,24 @@ def plan_partitions_predefined(
     fs_node_label = filesystem_node_label(edt)
 
     result = []
+    planned_labels = set()
     for dev_label, total_size, erase_size, parts, internal in devices:
+        # The internal flash's plan may have moved slot1 + filesystem onto
+        # this device already; skip its own pass-through so the plan does not
+        # carry duplicate entries.
+        if dev_label in planned_labels:
+            continue
         existing_labels = {p[0] for p in parts}
 
         # If this device has no mcuboot partitions, pass it through unchanged
-        # (or skip if empty).
+        # (or skip if empty). When the board glue deletes this device's
+        # partitions node, the generated file must re-emit what it carries
+        # (nothing upstream defines those labels anymore), so they are not
+        # "predefined".
         if "mcuboot" not in existing_labels:
             if parts:
                 upstream = [p for p in parts if p[0] not in APP_PARTITION_LABELS]
-                predefined = {p[0] for p in upstream}
+                predefined = set() if dev_label in deleted_devices else {p[0] for p in upstream}
                 result.append((dev_label, total_size, erase_size, list(upstream), predefined))
             continue
 
@@ -746,8 +783,13 @@ def plan_partitions_predefined(
 
             # Find the predefined mcuboot partition and ensure it's at
             # least MCUBOOT_SIZE since we're regenerating all partitions.
+            # A boards.toml boot_size pin replaces the floor (and the size
+            # carried over from the previous generated layout) entirely.
             boot = [p for p in parts if p[0] == "mcuboot"][0]
-            boot_size = max(boot[3], align_up(128 * KB, erase_size))
+            if boot_size_kb is not None:
+                boot_size = align_up(boot_size_kb * KB, erase_size)
+            else:
+                boot_size = max(boot[3], align_up(128 * KB, erase_size))
             boot_end = boot[2] + boot_size
 
             # Find the predefined storage partition (if any).
@@ -764,7 +806,9 @@ def plan_partitions_predefined(
             # Place storage + nvm at the end of internal flash, then grow
             # slot0 to fill the remaining space -- capped at the first
             # carried partition that lived beyond the previous slot0.
-            tail_size = storage_size + nvm_size
+            # With external_storage, the settings tail lives on the external
+            # flash instead and internal is entirely boot + slot0.
+            tail_size = (0 if external_storage else storage_size) + nvm_size
             tail_start = align_down(total_size - tail_size, erase_size)
             slot0_offset = align_up(boot_end, erase_size)
             slot0_limit = tail_start
@@ -773,6 +817,22 @@ def plan_partitions_predefined(
                     slot0_limit = min(slot0_limit, c[2])
                     break
             slot0_size = align_down(slot0_limit - slot0_offset, max_erase)
+
+            # A boards.toml slot_size pin replaces the fill-to-tail size.
+            # It may only shrink the fill result: growing further would
+            # clobber the storage tail or a carried partition.
+            if slot_size_kb is not None:
+                pinned = align_down(slot_size_kb * KB, max_erase)
+                if pinned > slot0_size:
+                    print(
+                        f"  Warning: {dev_label}: slot_size pin "
+                        f"({format_size(pinned)}) does not fit between the boot "
+                        "partition and the storage/carry tail; keeping the "
+                        f"fill size {format_size(slot0_size)}.",
+                        file=sys.stderr,
+                    )
+                else:
+                    slot0_size = pinned
 
             int_parts = [
                 ("mcuboot", "boot_partition", boot[2], boot_size),
@@ -791,15 +851,16 @@ def plan_partitions_predefined(
                 int_parts.append(("nvm", "nvm_partition", nvm_offset, nvm_size))
                 cursor = nvm_offset + nvm_size
 
-            storage_offset = align_up(cursor, erase_size)
-            if storage_offset + storage_size > total_size:
-                print(
-                    f"  Warning: {dev_label} has no room for the "
-                    f"{format_size(storage_size)} storage partition after the "
-                    "carried partitions; layout will overflow the device.",
-                    file=sys.stderr,
-                )
-            int_parts.append(("storage", "storage_partition", storage_offset, storage_size))
+            if not external_storage:
+                storage_offset = align_up(cursor, erase_size)
+                if storage_offset + storage_size > total_size:
+                    print(
+                        f"  Warning: {dev_label} has no room for the "
+                        f"{format_size(storage_size)} storage partition after the "
+                        "carried partitions; layout will overflow the device.",
+                        file=sys.stderr,
+                    )
+                int_parts.append(("storage", "storage_partition", storage_offset, storage_size))
 
             for label_prop, node_label, off, size in carried:
                 int_parts.append((label_prop, node_label, off, size))
@@ -807,6 +868,7 @@ def plan_partitions_predefined(
             # All partitions must be regenerated since the upstream partitions
             # node is deleted to allow slot0 to grow.
             result.append((dev_label, total_size, erase_size, int_parts, set()))
+            planned_labels.add(dev_label)
 
             # External: slot1 + filesystem
             # Swap-using-offset needs one extra max-erase sector in slot1.
@@ -831,6 +893,22 @@ def plan_partitions_predefined(
             ext_parts.append(("image-1", "slot1_partition", slot1_offset, slot1_size))
             cursor = align_up(slot1_offset + slot1_size, ext_erase)
 
+            # With external_storage, the settings tail goes right after
+            # slot1 -- before the carried partitions, which must keep their
+            # offsets. Warn (and skip) if it does not fit in the gap.
+            if external_storage:
+                storage_offset = align_up(cursor, ext_erase)
+                if ext_carried and storage_offset + storage_size > ext_carried[0][2]:
+                    print(
+                        f"  Warning: {ext_label} has no room for the "
+                        f"{format_size(storage_size)} storage partition before the "
+                        f"carried {ext_carried[0][0]} partition; skipping it.",
+                        file=sys.stderr,
+                    )
+                else:
+                    ext_parts.append(("storage", "storage_partition", storage_offset, storage_size))
+                    cursor = align_up(storage_offset + storage_size, ext_erase)
+
             for label_prop, node_label, off, size in ext_carried:
                 ext_parts.append((label_prop, node_label, off, size))
                 cursor = max(cursor, align_up(off + size, ext_erase))
@@ -840,6 +918,7 @@ def plan_partitions_predefined(
                 ext_parts.append(("filesystem", fs_node_label, cursor, fs_size))
 
             result.append((ext_label, ext_size, ext_erase, ext_parts, set()))
+            planned_labels.add(ext_label)
         else:
             # ── Keep the upstream slots; replace the upstream app tail ──
             # No separate external flash (or XIP: the mcuboot layout lives
@@ -871,37 +950,114 @@ def plan_partitions_predefined(
             # boot from the running image's own extent, so each image only
             # needs to fit in the window. Grown slots are re-emitted in the
             # generated file so they override the upstream sizes.
+            # A boards.toml slot_size pin replaces both the minimum and the
+            # 2 MB cap: slot0 is pinned to exactly that size (grow or
+            # shrink), with the same slot1 symmetry and tail-shift rules.
             boot_part = next((p for p in kept if p[0] == "mcuboot"), None)
             slot0_part = next((p for p in kept if p[0] == "image-0"), None)
             slot1_part = next((p for p in kept if p[0] == "image-1"), None)
-            if (
-                boot_part is not None
-                and slot0_part is not None
-                and slot0_part[3] < SLOT0_MIN_SIZE
-                and not carried
-            ):
+
+            # A boards.toml boot_size pin replaces the upstream boot size
+            # entirely (it does not grow: the pinned value is what the board
+            # wants). The boot partition is re-emitted so it overrides the
+            # upstream size, and the slots start after the new boot_end.
+            if boot_size_kb is not None and boot_part is not None:
+                new_boot_size = align_up(boot_size_kb * KB, erase_size)
+                if new_boot_size != boot_part[3]:
+                    kept = [p for p in kept if p[0] != "mcuboot"]
+                    kept.append(
+                        ("mcuboot", "boot_partition", boot_part[2], new_boot_size)
+                    )
+                    kept = sorted(kept, key=lambda p: p[2])
+                    predefined.discard("mcuboot")
+                    boot_part = ("mcuboot", "boot_partition", boot_part[2], new_boot_size)
+
+            shared_slot1_size = None
+            if slot_size_kb is not None:
+                new_size = align_down(slot_size_kb * KB, erase_size)
+                want_reslot = (
+                    boot_part is not None
+                    and slot0_part is not None
+                    and new_size != slot0_part[3]
+                    and not carried
+                )
+            elif filesystem_size_kb is not None and boot_part is not None and not carried:
+                # Filesystem cap: reserve the tail (storage + nvm) and the
+                # pinned filesystem size, and split the rest of the device
+                # between the slots. The upgrade mode for a slot1 layout is
+                # swap-using-offset, whose scratch is slot1's last max-erase
+                # sector: slot1 must be one sector larger than slot0, so
+                # slot1 takes the odd sector and slot0 gets the even remainder.
                 boot_end = align_up(boot_part[2] + boot_part[3], erase_size)
-                new_size = align_down(SLOT0_MIN_SIZE, erase_size)
+                tail_min = (
+                    align_up(STORAGE_SIZE, erase_size)
+                    + (0 if data_flash else erase_size)
+                )
+                shared = align_down(
+                    (total_size - boot_end - tail_min - filesystem_size_kb * KB
+                     - erase_size)  # slot1's extra swap-scratch sector
+                    // 2,
+                    erase_size,
+                )
+                if shared <= 0:
+                    print(
+                        f"  Warning: {dev_label}: no room for two slots "
+                        f"after the {format_size(filesystem_size_kb * KB)} "
+                        "filesystem cap and the storage tail. Keeping the "
+                        "upstream slot sizes.",
+                        file=sys.stderr,
+                    )
+                    want_reslot = False
+                else:
+                    new_size = shared
+                    shared_slot1_size = shared + erase_size
+                    # Re-slot when either slot deviates: a previous run may
+                    # have left slot1 symmetric (smaller) or larger, and
+                    # both slots must match the swap-using-offset geometry
+                    # for the filesystem cap to hold.
+                    want_reslot = (
+                        slot0_part is not None and new_size != slot0_part[3]
+                    ) or (
+                        slot1_part is not None and shared_slot1_size != slot1_part[3]
+                    )
+            else:
+                want_reslot = (
+                    boot_part is not None
+                    and slot0_part is not None
+                    and slot0_part[3] < SLOT0_MIN_SIZE
+                    and not carried
+                )
+            if want_reslot:
+                if slot_size_kb is None and filesystem_size_kb is None:
+                    new_size = align_down(SLOT0_MIN_SIZE, erase_size)
+                boot_end = align_up(boot_part[2] + boot_part[3], erase_size)
                 # slot1 grows to the same size so the two swap images stay
                 # symmetric (an upgrade slot smaller than slot0 cannot hold
                 # a swap). It moves if it no longer fits after slot0; it
                 # need not stay gap-free -- the SoC's flash cache region is
                 # configured at boot from the running image's own extent,
                 # so each image only needs to fit in the window.
-                slot1_size = max(
-                    slot1_part[3] if slot1_part else 0, new_size
-                )
-                slot1_offset = (
-                    max(slot1_part[2], boot_end + new_size) if slot1_part else 0
-                )
+                if filesystem_size_kb is not None and slot_size_kb is None:
+                    # Sharing mode: slot1 is one max-erase sector larger
+                    # than slot0 (swap-using-offset scratch), both derived
+                    # from the shared computation above.
+                    slot1_size = shared_slot1_size
+                    slot1_offset = boot_end + new_size
+                else:
+                    slot1_size = max(
+                        slot1_part[3] if slot1_part else 0, new_size
+                    )
+                    slot1_offset = (
+                        max(slot1_part[2], boot_end + new_size) if slot1_part else 0
+                    )
                 tail_min = (
                     align_up(STORAGE_SIZE, erase_size)
                     + (0 if data_flash else erase_size)
                 )
                 if slot1_offset + slot1_size + tail_min > total_size:
                     print(
-                        f"  Warning: {dev_label}: cannot grow slot0 to "
-                        f"{format_size(SLOT0_MIN_SIZE)}; the storage/nvm tail "
+                        f"  Warning: {dev_label}: cannot resize slot0 to "
+                        f"{format_size(new_size)}; the storage/nvm tail "
                         "would not fit. Keeping the upstream slot sizes.",
                         file=sys.stderr,
                     )
@@ -930,9 +1086,11 @@ def plan_partitions_predefined(
             # fits after slot0; the re-emitted slots override the upstream
             # sizes. This brings the planner's own earlier 8 MB XIP slots
             # (nucleo_n657x0_q) in line when their layout is regenerated.
+            # A boards.toml slot_size pin supersedes the cap.
             slot_cap = align_down(2 * MB, erase_size)
             if (
-                boot_part is not None
+                slot_size_kb is None
+                and boot_part is not None
                 and slot0_part is not None
                 and slot0_part[3] > slot_cap
                 and not carried
@@ -967,6 +1125,19 @@ def plan_partitions_predefined(
                     cursor = align_up(cursor + nvm_size, erase_size)
 
             fs_size = align_down(total_size - cursor, erase_size)
+            if filesystem_size_kb is not None:
+                # Cap the filesystem at the boards.toml size: trailing space
+                # stays free instead of being swallowed by the filesystem.
+                fs_cap = align_down(filesystem_size_kb * KB, erase_size)
+                if fs_cap > fs_size:
+                    print(
+                        f"  Warning: {dev_label}: only {format_size(fs_size)} "
+                        "free for the filesystem, less than the "
+                        f"{format_size(fs_cap)} cap; filling the free space.",
+                        file=sys.stderr,
+                    )
+                else:
+                    fs_size = fs_cap
             if fs_size > 0:
                 kept.append(("filesystem", fs_node_label, cursor, fs_size))
 
@@ -1110,6 +1281,10 @@ def plan_partitions(
     deleted_devices=None,
     single_app=False,
     overwrite_only=False,
+    boot_size_kb=None,
+    slot_size_kb=None,
+    filesystem_size_kb=None,
+    external_storage=False,
 ):
     """Determine the partition layout based on available flash devices.
 
@@ -1155,6 +1330,10 @@ def plan_partitions(
             deleted_devices,
             single_app,
             overwrite_only,
+            boot_size_kb=boot_size_kb,
+            slot_size_kb=slot_size_kb,
+            filesystem_size_kb=filesystem_size_kb,
+            external_storage=external_storage,
         )
 
     all_flash = discover_all_flash(edt, flash_overrides)
@@ -1396,7 +1575,9 @@ def generate_partitions_dtsi(planned_devices, mapped_devices=None):
     Each entry in planned_devices is:
         (dev_label, total_size, erase_size, parts, predefined_labels)
     where predefined_labels is a set of partition labels already defined in the
-    upstream DTS. Those partitions are skipped in the generated output.
+    upstream DTS. Those partitions are skipped in the generated output, but
+    commented with their geometry so the generated file alone still documents
+    where they sit (e.g. an upstream-defined mcuboot partition).
 
     mapped_devices is the set of device labels that may carry
     ``zephyr,mapped-partition`` children (see mapped_partition_devices()); None
@@ -1408,7 +1589,14 @@ def generate_partitions_dtsi(planned_devices, mapped_devices=None):
     for dev_label, total_size, erase_size, parts, *rest in planned_devices:
         predefined = rest[0] if rest else set()
         new_parts = [(l, nl, o, s) for l, nl, o, s in parts if l not in predefined]
-        if not new_parts:
+        # Upstream-defined partitions this file keeps as-is: they have known
+        # geometry in the plan (so they can be listed) even though they are
+        # not re-emitted.
+        inherited = sorted(
+            ((l, nl, o, s) for l, nl, o, s in parts if l in predefined),
+            key=lambda p: p[2],
+        )
+        if not new_parts and not inherited:
             continue
 
         lines.append(f"&{dev_label} {{")
@@ -1429,6 +1617,16 @@ def generate_partitions_dtsi(planned_devices, mapped_devices=None):
                 # XIP jump (flash device base + image offset) both need the
                 # absolute address unless the SoC aliases the flash at 0.
                 lines.append("\t\tranges;")
+
+        if inherited:
+            lines.append("")
+            lines.append("\t\t/* Inherited from the upstream board dts and kept as-is")
+            lines.append("\t\t * (not re-emitted here):")
+            for label, node_label, offset, size in inherited:
+                lines.append(
+                    f"\t\t *   {label} ({node_label}): 0x{offset:x} + {format_dt_size(size)}"
+                )
+            lines.append("\t\t */")
 
         for label, node_label, offset, size in new_parts:
             lines.append("")
@@ -1753,6 +1951,7 @@ def sectors_conf_block(max_sectors, layout_kconfig="", nor_page_size=0,
     )
 
 
+
 def gen_sectors_conf(board_key, planned, nor_kconfigs=None, split=None):
     """Write (or remove) conf/<key>-autogen.conf, the generated conf fragment
     that pairs with the optional hand-maintained conf/<key>.conf, setting
@@ -1793,10 +1992,10 @@ def gen_sectors_conf(board_key, planned, nor_kconfigs=None, split=None):
 
     Alongside the conf, this also writes conf/<key>-autogen.mk, a make
     fragment carrying MCUBOOT_UF2_APP_BASE: the primary slot's offset within
-    its flash device. Adaboot's UF2 writer routes blocks by flash-area
-    offset, so .uf2 files must carry device-relative target addresses; host
-    tooling (e.g. CircuitPython's port Makefile) includes this fragment to
-    convert a signed app binary to .uf2 with the right base.
+    its flash device. Adaboot's UF2 writer routes blocks by target address,
+    so .uf2 files must carry the right addresses; host tooling (e.g.
+    CircuitPython's port Makefile) includes this fragment to convert a signed
+    app binary to .uf2 with the right base.
     """
     autogen_path = SECTORS_CONF_DIR / f"{board_key}-autogen.conf"
     uf2_mk_path = SECTORS_CONF_DIR / f"{board_key}-autogen.mk"
@@ -1858,9 +2057,11 @@ def gen_sectors_conf(board_key, planned, nor_kconfigs=None, split=None):
         "# Generated by tools/partition_layout.py; do not edit by hand --\n"
         f"# re-run `python3 tools/partition_layout.py --fix {board_key}` after\n"
         "# changing the layout. Consumed by host tooling that builds .uf2\n"
-        "# files: Adaboot's UF2 writer routes blocks by flash-area offset, so\n"
+        "# files: Adaboot's UF2 writer routes blocks by target address, so\n"
         "# a .uf2's target addresses start at the app slot's offset within\n"
-        "# its flash device.\n"
+        "# its flash device. Blocks aimed at partitions on other flash\n"
+        "# devices are addressed at their natural device offset and must\n"
+        "# carry the partition-name extension tag instead.\n"
         "MCUBOOT_UF2_APP_BASE := 0x"
         + f"{slot0_offset:x}\n"
     )
@@ -1922,6 +2123,10 @@ def gen_all_sectors_conf():
                 deleted_devices=glue_deleted_partition_devices(glue_path),
                 single_app=entry.get("single_app", False),
                 overwrite_only=entry["mcuboot_mode"] == "overwrite_only",
+                boot_size_kb=entry.get("boot_size"),
+                slot_size_kb=entry.get("slot_size"),
+                filesystem_size_kb=entry.get("filesystem_size"),
+                external_storage=entry.get("external_storage", False),
             )
             gen_sectors_conf(key, planned if planned else [], nor_page_layout_kconfigs(edt))
 
@@ -1990,6 +2195,10 @@ def fix_alignment(
     flash_overrides=None,
     single_app=False,
     overwrite_only=False,
+    boot_size_kb=None,
+    slot_size_kb=None,
+    filesystem_size_kb=None,
+    external_storage=False,
 ):
     """Plan and write the partition layout to
     dts/<vendor>/<board>-partitions.dtsi.
@@ -2040,6 +2249,10 @@ def fix_alignment(
         deleted_devices=glue_deleted_partition_devices(dtsi_dir / f"{board_key}.dtsi"),
         single_app=single_app,
         overwrite_only=overwrite_only,
+        boot_size_kb=boot_size_kb,
+        slot_size_kb=slot_size_kb,
+        filesystem_size_kb=filesystem_size_kb,
+        external_storage=external_storage,
     )
     if not planned:
         print("  No flash devices found to plan partitions for.")
@@ -2167,6 +2380,10 @@ def main():
             flash_overrides,
             single_app=entry.get("single_app", False),
             overwrite_only=entry["mcuboot_mode"] == "overwrite_only",
+            boot_size_kb=entry.get("boot_size"),
+            slot_size_kb=entry.get("slot_size"),
+            filesystem_size_kb=entry.get("filesystem_size"),
+            external_storage=entry.get("external_storage", False),
         )
     else:
         split = plan_code_partition_split(edt, flash_overrides)

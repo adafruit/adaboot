@@ -57,3 +57,40 @@
 };
 
 #include "nrf54lm20dk-partitions.dtsi"
+
+/* Bootloader info shared-data area: the last KB of this board's RAM, kept
+ * out of the managed RAM so neither image clobbers it. The bootloader
+ * writes its boot state here on every boot (BOOT_SHARE_DATA_BOOTINFO ->
+ * BLINFO TLVs via boot_write_shared_data()); the application reads the
+ * same region to answer the SMP bootloader-info command (RETENTION_
+ * BOOTLOADER_INFO_TYPE_MCUBOOT). Carved here because this dtsi applies to
+ * both images. */
+&cpuapp_sram {
+	reg = <0x20000000 0x7f800>;
+};
+
+/ {
+	chosen {
+		zephyr,bootloader-info = &boot_info0;
+	};
+
+	boot_info_sram: sram@2007f800 {
+		compatible = "zephyr,memory-region", "mmio-sram";
+		reg = <0x2007f800 0x400>;
+		zephyr,memory-region = "BOOT_INFO_SRAM";
+		status = "okay";
+
+		retainedmem {
+			compatible = "zephyr,retained-ram";
+			status = "okay";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			boot_info0: boot_info@0 {
+				compatible = "zephyr,retention";
+				status = "okay";
+				reg = <0x0 0x100>;
+			};
+		};
+	};
+};

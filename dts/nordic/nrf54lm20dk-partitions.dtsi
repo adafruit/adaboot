@@ -14,43 +14,36 @@
 		compatible = "fixed-partitions";
 		#address-cells = <1>;
 		#size-cells = <1>;
+		ranges;
 
 		boot_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
 			label = "mcuboot";
 			reg = <0x0 DT_SIZE_K(128)>;
 		};
 
 		slot0_partition: partition@20000 {
+			compatible = "zephyr,mapped-partition";
 			label = "image-0";
 			reg = <0x20000 DT_SIZE_K(1868)>;
 		};
 
-		nvm_partition: partition@1f3000 {
-			label = "nvm";
-			reg = <0x1f3000 DT_SIZE_K(4)>;
-		};
-
-		storage_partition: partition@1f4000 {
+		storage_partition: partition@1f3000 {
+			compatible = "zephyr,mapped-partition";
 			label = "storage";
-			reg = <0x1f4000 DT_SIZE_K(36)>;
-		};
-	};
-};
-
-&mx25r64 {
-	partitions {
-		compatible = "fixed-partitions";
-		#address-cells = <1>;
-		#size-cells = <1>;
-
-		slot1_partition: partition@0 {
-			label = "image-1";
-			reg = <0x0 DT_SIZE_K(1872)>;
+			reg = <0x1f3000 DT_SIZE_K(32)>;
 		};
 
-		fatfs_partition: partition@1d4000 {
+		nvm_partition: partition@1fb000 {
+			compatible = "zephyr,mapped-partition";
+			label = "nvm";
+			reg = <0x1fb000 DT_SIZE_K(4)>;
+		};
+
+		fatfs_partition: partition@1fc000 {
+			compatible = "zephyr,mapped-partition";
 			label = "filesystem";
-			reg = <0x1d4000 DT_SIZE_K(6320)>;
+			reg = <0x1fc000 DT_SIZE_K(4)>;
 		};
 	};
 };

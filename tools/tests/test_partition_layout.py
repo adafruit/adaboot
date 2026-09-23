@@ -963,7 +963,85 @@ class TestPredefinedMcuboot:
         assert parts_by_label["image-1"][2] == 0x190000
         assert predefined == {"mcuboot", "image-0", "image-1"}
 
-    def test_predefined_slot0_min_skipped_when_tail_would_not_fit(self):
+    def test_predefined_filesystem_cap_shares_rest_between_slots(self):
+        """filesystem_size caps the filesystem; slots split the remainder."""
+        flash = _flash_with_partitions("flash0", 4 * MB, 4096, _DA14695_PARTITIONS)
+        edt = _make_edt(flash)
+        result = plan_partitions(edt, filesystem_size_kb=1024)
+        _, _, _, parts, predefined = result[0]
+        parts_by_label = {p[0]: p for p in parts}
+        # 4 MB device: after the boot partition, the 36 KB tail and the 1 MB
+        # filesystem cap, the two slots split the rest with slot1 one sector
+        # larger than slot0 (swap-using-offset scratch).
+        assert parts_by_label["image-0"][2] == 0x10000
+        assert parts_by_label["image-0"][3] == 1484 * KB
+        assert parts_by_label["image-1"][3] == 1488 * KB
+        assert parts_by_label["image-1"][2] == 0x183000
+        assert parts_by_label["storage"][2] == 0x2F7000
+        assert parts_by_label["filesystem"][3] == 1 * MB
+        assert predefined == {"mcuboot"}
+
+    def test_predefined_slot_size_pin_grows(self):
+        """A slot_size pin resizes slot0 (and symmetric slot1) past the fill."""
+        flash = _flash_with_partitions("flash0", 4 * MB, 4096, _DA14695_PARTITIONS)
+        edt = _make_edt(flash)
+        result = plan_partitions(edt, slot_size_kb=1536)
+        _, _, _, parts, predefined = result[0]
+        parts_by_label = {p[0]: p for p in parts}
+        assert parts_by_label["image-0"][3] == 1536 * KB
+        assert parts_by_label["image-0"][2] == 0x10000
+        # slot1 grows to stay symmetric and shifts after the resized slot0.
+        assert parts_by_label["image-1"][3] == 1536 * KB
+        assert parts_by_label["image-1"][2] == 0x190000
+        # The tail moves past slot1.
+        assert parts_by_label["storage"][2] == 0x310000
+        assert predefined == {"mcuboot"}
+
+    def test_predefined_slot_size_pin_shrinks(self):
+        """A slot_size pin below SLOT0_MIN_SIZE shrinks the slots instead."""
+        flash = _flash_with_partitions("flash0", 4 * MB, 4096, _DA14695_PARTITIONS)
+        edt = _make_edt(flash)
+        result = plan_partitions(edt, slot_size_kb=640)
+        _, _, _, parts, predefined = result[0]
+        parts_by_label = {p[0]: p for p in parts}
+        assert parts_by_label["image-0"][3] == 640 * KB
+        assert parts_by_label["image-1"][3] == 640 * KB
+        assert parts_by_label["image-1"][2] == 0x0B0000
+        assert parts_by_label["storage"][2] == 0x150000
+        assert predefined == {"mcuboot"}
+
+    def test_predefined_slot_size_pin_noop_when_equal(self):
+        """A pin matching the current slot size leaves the layout untouched."""
+        big = [
+            ("mcuboot", "boot_partition", 0x2400, 0xDC00),
+            ("image-0", "slot0_partition", 0x10000, 1536 * KB),
+            ("image-1", "slot1_partition", 0x190000, 1536 * KB),
+        ]
+        flash = _flash_with_partitions("flash0", 4 * MB, 4096, big)
+        edt = _make_edt(flash)
+        result = plan_partitions(edt, slot_size_kb=1536)
+        _, _, _, parts, predefined = result[0]
+        parts_by_label = {p[0]: p for p in parts}
+        assert parts_by_label["image-0"][2] == 0x10000
+        assert parts_by_label["image-1"][2] == 0x190000
+        assert predefined == {"mcuboot", "image-0", "image-1"}
+
+    def test_predefined_slot_size_pin_skipped_when_tail_would_not_fit(self):
+        """A pin is skipped (upstream sizes kept) when the tail cannot fit."""
+        small = [
+            ("mcuboot", "boot_partition", 0x2400, 0xDC00),
+            ("image-0", "slot0_partition", 0x10000, 512 * KB),
+            ("image-1", "slot1_partition", 0x90000, 300 * KB),
+        ]
+        # 1 MB device: a 900 KB pin plus the symmetric slot1 leaves no tail.
+        flash = _flash_with_partitions("flash0", 1 * MB, 4096, small)
+        edt = _make_edt(flash)
+        result = plan_partitions(edt, slot_size_kb=900)
+        _, _, _, parts, predefined = result[0]
+        parts_by_label = {p[0]: p for p in parts}
+        assert parts_by_label["image-0"][3] == 512 * KB
+        assert predefined == {"mcuboot", "image-0", "image-1"}
+
         """Growth is skipped (upstream sizes kept) when the tail cannot fit."""
         # A 1M flash cannot hold 1M slot0 + 1M slot1 plus the tail, so the
         # upstream geometry is kept (with a warning).

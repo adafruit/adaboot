@@ -1,1 +1,47 @@
 #include "siwx917_dk2605a-partitions.dtsi"
+
+/* Bootloader UI: mcuboot-button0 is the entrance button (BTN0, per the
+ * board's sw0 alias) and mcuboot-led0 the status LED for a
+ * CONFIG_MCUBOOT_INDICATION_LED build. */
+/ {
+	aliases {
+		mcuboot-button0 = &button0;
+		mcuboot-led0 = &led0;
+	};
+};
+
+/* Boot-mode retention cell: the application sets it to request the
+ * bootloader's update mode (reset_to_bootloader() / RunMode.UF2) and the
+ * bootloader reads and clears it at boot (io_detect_boot_mode()). SRAM
+ * content survives the warm reset that follows the request, which is all a
+ * button-less entrance needs; a power cycle simply drops the request.
+ *
+ * This board has no bootloader-info (BLINFO) shared-data region, unlike
+ * every other Adaboot board: wiseconnect pins sram0 at exactly 319 KB
+ * (its RAM-size table picks MEM_CONFIG from the size), so sram0 cannot be
+ * carved for a dedicated block, and this board reports no boot state over
+ * SMP. The cell instead lives in the tail of the SoC's 1 KB NWP-reserved
+ * SRAM (NWP_RESERVED_RAM at 0x0), the only address range outside the
+ * managed heap that is not already spoken for. This dtsi applies to both
+ * the bootloader and the application images.
+ */
+&nwp_reserved {
+	retainedmem {
+		compatible = "zephyr,retained-ram";
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_mode0: boot_mode@3f0 {
+			compatible = "zephyr,retention";
+			status = "okay";
+			reg = <0x3f0 0x1>;
+		};
+	};
+};
+
+/ {
+	chosen {
+		zephyr,boot-mode = &boot_mode0;
+	};
+};

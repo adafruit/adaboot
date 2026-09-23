@@ -219,17 +219,34 @@ static void uf2_disk_close_regions(void)
 	num_disk_regions = 0;
 }
 
+/* Flash device of region 0 (the primary slot). Its device-relative
+ * offsets are the UF2 address space's window 0: every region sharing
+ * that device uses plain fa_off and is reachable by address-only
+ * routing. Regions on any other device are addressed at their natural
+ * device offset and are reachable *only* via the partition-name tag,
+ * since device offset spaces overlap and cannot share the window. */
+static const struct device *primary_flash_dev;
+
 /**
  * Add a flash area to the writable region table. Optional areas may
  * fail to open (e.g. on a different flash device); callers log and move
  * on. Returns 0 or a negative errno.
+ *
+ * @p label is the region's partition name, as carried in the
+ * UF2_EXT_TAG_PARTITION extension tag and used to route tagged blocks.
+ * Names follow the node-label vocabulary the bootloader's own code
+ * uses (slot0_partition -> "slot0", storage_partition -> "storage",
+ * ...) rather than the devicetree label *property* ("image-0"), so the
+ * tag strings and the registration calls below must stay in sync with
+ * any .uf2 generator that names the region's partition.
  */
-static int uf2_disk_add_region(int area_id)
+static int uf2_disk_add_region(int area_id, const char *label)
 {
 	const struct flash_area *fap;
 	const struct device *flash_dev;
 	const struct flash_parameters *params;
 	size_t write_block_size = 1;
+	uint32_t base;
 	uint8_t idx;
 	int rc;
 
@@ -256,18 +273,68 @@ static int uf2_disk_add_region(int area_id)
 		}
 	}
 
+	/* Determine the region's address in the UF2 address space. Region 0
+	 * is the primary slot: its flash device defines window 0, whose
+	 * regions are addressed by plain device offset -- what every
+	 * existing .uf2 targets and what the CURRENT.UF2 readback mirrors --
+	 * and they are reachable by address-only routing. Regions on any
+	 * other flash device are addressed by their natural device offset
+	 * and are reachable only via the partition-name extension tag
+	 * (UF2_EXT_TAG_PARTITION): device offset spaces overlap, so
+	 * address-only routing cannot tell which device a block was aimed
+	 * at.
+	 */
+	bool address_routed;
+	if (num_disk_regions == 0) {
+		primary_flash_dev = flash_dev;
+		base = fap->fa_off;
+		address_routed = true;
+	} else if (primary_flash_dev != NULL && flash_dev == primary_flash_dev) {
+		base = fap->fa_off;
+		address_routed = true;
+	} else {
+		base = fap->fa_off;
+		address_routed = false;
+	}
+
+	/* Routing matches the first region containing the target address,
+	 * so regions reachable by address must be disjoint from each
+	 * other. Regions on other flash devices share the offset space but
+	 * are only reachable via their partition-name tag, so they may
+	 * overlap window 0 freely; a block for one of them must be tagged
+	 * and is checked against the named region's bounds at routing
+	 * time.
+	 */
+	for (uint8_t i = 0; i < num_disk_regions; i++) {
+		if (!address_routed || !uf2_regions[i].address_routed) {
+			continue;
+		}
+		if (base < uf2_regions[i].base + uf2_regions[i].size &&
+		    uf2_regions[i].base < base + fap->fa_size) {
+			BOOT_LOG_ERR("UF2: region base 0x%x overlaps "
+				     "region %u (base 0x%x); not writable",
+				     (unsigned int)base, i,
+				     (unsigned int)uf2_regions[i].base);
+			flash_area_close(fap);
+			return -EINVAL;
+		}
+	}
+
 	idx = num_disk_regions++;
+	uf2_regions[idx].base = base;
+	uf2_regions[idx].size = fap->fa_size;
+	uf2_regions[idx].ctx = (void *)fap;
+	uf2_regions[idx].label = label;
+	uf2_regions[idx].address_routed = address_routed;
+
 	disk_regions[idx].fap = fap;
 	disk_regions[idx].write_block_size = write_block_size;
 	disk_regions[idx].bytes_written = 0;
 
-	uf2_regions[idx].base = fap->fa_off;
-	uf2_regions[idx].size = fap->fa_size;
-	uf2_regions[idx].ctx = (void *)fap;
-
 	BOOT_LOG_INF("UF2 writable region %u: flash area %d "
-		     "(offset 0x%x, size 0x%x)",
+		     "(base 0x%x, offset 0x%x, size 0x%x)",
 		     idx, area_id,
+		     (unsigned int)uf2_regions[idx].base,
 		     (unsigned int)fap->fa_off,
 		     (unsigned int)fap->fa_size);
 
@@ -295,7 +362,7 @@ int uf2_disk_register(void)
 	 * target address, so dropping e.g. a filesystem image onto the drive
 	 * writes the storage partition instead of the application.
 	 */
-	rc = uf2_disk_add_region(FLASH_AREA_IMAGE_PRIMARY(0));
+	rc = uf2_disk_add_region(FLASH_AREA_IMAGE_PRIMARY(0), "slot0");
 	if (rc != 0) {
 		BOOT_LOG_ERR("Failed to open primary slot for UF2: %d", rc);
 		return rc;
@@ -307,7 +374,7 @@ int uf2_disk_register(void)
 	 * (or wipe the filesystem) via UF2 in addition to firmware. Blocks
 	 * addressed inside the partition are erased and written there;
 	 * everything else is untouched. */
-	rc = uf2_disk_add_region(PARTITION_ID(storage_partition));
+	rc = uf2_disk_add_region(PARTITION_ID(storage_partition), "storage");
 	if (rc != 0) {
 		BOOT_LOG_WRN("Storage partition not writable via UF2: %d", rc);
 	}
@@ -323,7 +390,7 @@ int uf2_disk_register(void)
 	 * executing while UF2 mode is active. Only enable where the SoC can
 	 * write flash while executing from it; it makes CURRENT.UF2 readbacks
 	 * fully restorable by drag-and-drop. */
-	rc = uf2_disk_add_region(PARTITION_ID(mcuboot));
+	rc = uf2_disk_add_region(PARTITION_ID(mcuboot), "mcuboot");
 	if (rc != 0) {
 		BOOT_LOG_WRN("Bootloader partition not writable via UF2: %d", rc);
 	}

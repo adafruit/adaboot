@@ -277,6 +277,21 @@ methods (``BOOT_SERIAL_ENTRANCE_GPIO``, ``BOOT_SERIAL_DOUBLE_TAP``,
 same combined mode — there is no separate serial-only or UF2-only mode to
 choose between.
 
+All entrances are served by one wait window at boot (``boot_wait_for_update()``,
+length: the longest of ``BOOT_SERIAL_WAIT_FOR_DFU_TIMEOUT`` and the double-tap
+window). The window checks the button, the pin-reset cause, the boot-mode
+retention flag (a double reset, or the application's request via
+``reset_to_bootloader()`` — this enters immediately, with no window latency)
+and the first incoming mcumgr command, then boots the application if none
+fired. Boards without a double-tap or serial wait window keep instant
+entrance checks instead.
+
+The LED indicator (``CONFIG_MCUBOOT_INDICATION_LED``) mirrors
+Adafruit_nRF52_Bootloader: a fast red-style fade starts at boot and covers
+both waiting for a reset and waiting for firmware (no distinct tempo when
+update mode is entered), then the LED goes dark right before the application
+starts.
+
 ## Updating firmware
 
 1. Enter the bootloader update mode (GPIO button, double-tap, boot-mode

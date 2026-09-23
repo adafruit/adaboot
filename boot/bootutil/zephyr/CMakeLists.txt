@@ -2,6 +2,16 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+# Adaboot update-mode request helpers: let any application built against this
+# module ask the installed bootloader for its update mode, whether that is
+# this fork's MCUboot bootloader or the stock Adafruit nRF52 one (see
+# ../../zephyr/include/adaboot/update_mode.h for the per-bootloader
+# mechanism). Compiled unconditionally so callers can keep using the helpers
+# on boards with neither backend, where they are no-ops.
+zephyr_include_directories(../../zephyr/include)
+zephyr_library_named(adaboot_update_mode)
+zephyr_library_sources(../../zephyr/update_mode.c)
+
 if(CONFIG_MCUBOOT_BOOTUTIL_LIB)
   zephyr_interface_library_named(MCUBOOT_BOOTUTIL)
 
