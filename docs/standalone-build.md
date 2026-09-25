@@ -59,32 +59,34 @@ make workspace ZEPHYR_REV=<sha>
 
 ## Build one board
 
-The board keys are the partition-layout names in `dts/<vendor>/` (the dtsi
-filename stem), which are the same keys in `tools/boards.toml` and
-`dts/mcuboot_boards.cmake`:
+Boards are addressed by a CircuitPython-style id, `<vendor>_<board>` (e.g.
+`nordic_nrf54l15dk`): the prefix names the vendor directory the board's layout
+dtsi (`dts/<vendor>/`) and conf fragments (`conf/<vendor>/`) live in. Stripping
+it yields the partition key, the dtsi filename stem, which is the same key used
+in `tools/boards.toml` and `dts/mcuboot_boards.cmake`:
 
 ```
 make list
-make build BOARD=nrf54l15dk
-make updater BOARD=nrf54l15dk
+make build BOARD=nordic_nrf54l15dk
+make updater BOARD=nordic_nrf54l15dk
 ```
 
 `make build` produces the bootloader. `make updater` builds the bootloader and
 then [samples/bootloader-updater](../samples/bootloader-updater/README.md) --
 an ordinary slot0 application that embeds that `mcuboot.bin` and, when booted,
 overwrites the `mcuboot` (boot) partition with it (a self-update of the
-bootloader). Its output, `build-<key>-updater/zephyr/zephyr.signed.bin`, is a
+bootloader). Its output, `build-<vendor>_<board>-updater/zephyr/zephyr.signed.bin`, is a
 hash-only mcuboot image you flash to slot0 (UF2 / serial recovery / debugger).
 
-Output lands in `build-nrf54l15dk/`:
+Output lands in `build-nordic_nrf54l15dk/`:
 
 - `mcuboot.bin` / `mcuboot.hex` -- copies of `zephyr/zephyr.{bin,hex}`
 - `zephyr/zephyr.elf` -- the ELF
 
-What `make build` actually runs is, for `nrf54l15dk`:
+What `make build` actually runs is, for `nordic_nrf54l15dk`:
 
 ```
-west build -b nrf54l15dk/nrf54l15/cpuapp -d build-nrf54l15dk boot/zephyr -- \
+west build -b nrf54l15dk/nrf54l15/cpuapp -d build-nordic_nrf54l15dk boot/zephyr -- \
   -DEXTRA_ZEPHYR_MODULES=$PWD \
   -DEXTRA_DTC_OVERLAY_FILE=$PWD/dts/nordic/nrf54l15dk.dtsi \
   -DEXTRA_CONF_FILE=$PWD/conf/adaboot.conf
@@ -115,13 +117,14 @@ board-specific conf fragment instead.
 ### Board-specific conf fragments
 
 A board can opt into USB/UART-dependent recovery features (UF2, serial
-recovery, the no-application fallback) by adding `conf/<key>.conf` (where
-`<key>` is the partition key, e.g. `nrf54lm20dk`). When present, `make build`
+recovery, the no-application fallback) by adding `conf/<vendor>/<key>.conf` (where
+`<key>` is the partition key, e.g. `nrf54lm20dk`, and `<vendor>` its
+directory in the `dts/` tree, e.g. `nordic`). When present, `make build`
 and `make updater` append it -- after `conf/adaboot.conf` -- to
 `EXTRA_CONF_FILE`, so its settings layer on top of the signature defaults.
-Boards without a `conf/<key>.conf` build the minimal bootloader as before.
+Boards without a `conf/<vendor>/<key>.conf` build the minimal bootloader as before.
 
-For example, `conf/nrf54lm20dk.conf` enables UF2 drag-and-drop plus the
+For example, `conf/nordic/nrf54lm20dk.conf` enables UF2 drag-and-drop plus the
 `MCUBOOT_UF2_NO_APPLICATION` fallback, so the bootloader enters UF2 mode
 (presents a USB mass-storage drive) when no bootable application is found
 instead of halting. It also enables double-tap reset entrance and the
@@ -149,17 +152,17 @@ sysbuild (`SB_CONFIG_MCUBOOT_MODE_*` -> `CONFIG_*`), translated for a direct
 ```
 make all                       # build every board, continue on error
 make all STOP_ON_ERROR=1       # stop on the first failing board
-make all BOARDS='nrf54l15dk nucleo_u575zi_q'   # build a subset
+make all BOARDS='nordic_nrf54l15dk st_nucleo_u575zi_q'   # build a subset
 ```
 
 ## Updater UF2 files
 
-For boards whose bootloader is UF2-capable (a `conf/<key>.conf` that enables
+For boards whose bootloader is UF2-capable (a `conf/<vendor>/<key>.conf` that enables
 `CONFIG_MCUBOOT_UF2=y`), the updater can be shipped as a `.uf2` you drag onto
 the bootloader's USB mass-storage drive:
 
 ```
-make uf2 BOARD=nrf54lm20dk     # build the updater + emit mcuboot-updater.uf2
+make uf2 BOARD=nordic_nrf54lm20dk     # build the updater + emit mcuboot-updater.uf2
 make all-uf2                    # every UF2-capable board (override UF2_BOARDS=...)
 ```
 
@@ -170,15 +173,15 @@ family ID is the bootloader's `CONFIG_MCUBOOT_UF2_FAMILY_ID`. Both are read
 from the freshly built trees by `tools/uf2_updater.py`. Output:
 
 ```
-build-<key>-updater/mcuboot-updater.uf2   (drag onto the UF2 drive)
+build-<vendor>_<board>-updater/mcuboot-updater.uf2   (drag onto the UF2 drive)
 ```
 
 ## Other targets
 
 ```
-make menuconfig BOARD=nrf54l15dk
-make flash BOARD=nrf54l15dk
-make clean BOARD=nrf54l15dk      # remove one build dir
+make menuconfig BOARD=nordic_nrf54l15dk
+make flash BOARD=nordic_nrf54l15dk
+make clean BOARD=nordic_nrf54l15dk      # remove one build dir
 make clean-all                   # remove every build-* dir
 make clean-workspace              # remove deps/ and .west (keeps the repo)
 make update                      # re-run west update (e.g. after bumping ZEPHYR_REV)
@@ -188,7 +191,7 @@ make update                      # re-run west update (e.g. after bumping ZEPHYR
 
 - `make build` builds a **minimal** bootloader (boot slot0, single-app or swap
   per layout, hash-only). UF2 and serial recovery are board-specific (they need a USB
-  or UART backend): add a `conf/<key>.conf` board fragment to opt a board in
+  or UART backend): add a `conf/<vendor>/<key>.conf` board fragment to opt a board in
   (see "Board-specific conf fragments" above). The conf fragments
   themselves stay hardware-agnostic.
 - The partition layout comes from this fork's `dts/`; if you edit a dtsi you see

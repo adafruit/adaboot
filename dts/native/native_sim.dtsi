@@ -4,6 +4,17 @@
  * the CircuitPython port: the whole simulated flash minus storage/nvm is the
  * user filesystem.
  */
+/ {
+	chosen {
+		/* Upstream's native_sim.dts points this at its slot0_partition, which the
+		 * layout below replaces. Nothing boots from the simulated flash, so the
+		 * choice is meaningless anyway -- drop it rather than leaving a reference
+		 * to a deleted label.
+		 */
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
 &flash0 {
 	/delete-node/ partitions;
 

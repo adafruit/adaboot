@@ -29,7 +29,7 @@ CircuitPython's `zephyr-cp` port uses) -- no west manifest of your own required:
 ```
 make workspace                     # one-time: fetches Adafruit Zephyr + HALs into deps/
 make list                          # boards this fork can build
-make build BOARD=nrf54l15dk        # build the bootloader for one board
+make build BOARD=nordic_nrf54l15dk  # build the bootloader for one board
 make all                           # build every board
 ```
 

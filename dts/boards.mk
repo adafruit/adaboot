@@ -10,57 +10,77 @@
 # MCUBOOT_BOARDS   every partition key that boots via mcuboot
 # <key>_BOARD      canonical Zephyr board id (value passed to `west build -b`)
 # <key>_DTSI       path to the layout overlay (dts/<vendor>/<key>.dtsi)
+# <key>_BOARD_ID   the board's standalone-build id (<vendor>_<board>,
+#                  matching CircuitPython's BOARD ids; a key that already
+#                  starts with its vendor name is its own id)
 
 MCUBOOT_BOARDS := da14695_dk_usb ek_ra6m5 ek_ra8d1 frdm_mcxn947 frdm_rw612 mimxrt1170_evk nrf5340dk nrf54h20dk nrf54l15dk nrf54lm20dk nrf7002dk nucleo_n657x0_q nucleo_u575zi_q siwx917_dk2605a stm32h750b_dk stm32h7b3i_dk stm32wba65i_dk1
 
 da14695_dk_usb_BOARD := da14695_dk_usb
 da14695_dk_usb_DTSI := dts/renesas/da14695_dk_usb.dtsi
+da14695_dk_usb_BOARD_ID := renesas_da14695_dk_usb
 
 ek_ra6m5_BOARD := ek_ra6m5
 ek_ra6m5_DTSI := dts/renesas/ek_ra6m5.dtsi
+ek_ra6m5_BOARD_ID := renesas_ek_ra6m5
 
 ek_ra8d1_BOARD := ek_ra8d1
 ek_ra8d1_DTSI := dts/renesas/ek_ra8d1.dtsi
+ek_ra8d1_BOARD_ID := renesas_ek_ra8d1
 
 frdm_mcxn947_BOARD := frdm_mcxn947/mcxn947/cpu0
 frdm_mcxn947_DTSI := dts/nxp/frdm_mcxn947.dtsi
+frdm_mcxn947_BOARD_ID := nxp_frdm_mcxn947
 
 frdm_rw612_BOARD := frdm_rw612
 frdm_rw612_DTSI := dts/nxp/frdm_rw612.dtsi
+frdm_rw612_BOARD_ID := nxp_frdm_rw612
 
 mimxrt1170_evk_BOARD := mimxrt1170_evk@A/mimxrt1176/cm7
 mimxrt1170_evk_DTSI := dts/nxp/mimxrt1170_evk.dtsi
+mimxrt1170_evk_BOARD_ID := nxp_mimxrt1170_evk
 
 nrf5340dk_BOARD := nrf5340dk/nrf5340/cpuapp
 nrf5340dk_DTSI := dts/nordic/nrf5340dk.dtsi
+nrf5340dk_BOARD_ID := nordic_nrf5340dk
 
 nrf54h20dk_BOARD := nrf54h20dk/nrf54h20/cpuapp
 nrf54h20dk_DTSI := dts/nordic/nrf54h20dk.dtsi
+nrf54h20dk_BOARD_ID := nordic_nrf54h20dk
 
 nrf54l15dk_BOARD := nrf54l15dk/nrf54l15/cpuapp
 nrf54l15dk_DTSI := dts/nordic/nrf54l15dk.dtsi
+nrf54l15dk_BOARD_ID := nordic_nrf54l15dk
 
 nrf54lm20dk_BOARD := nrf54lm20dk/nrf54lm20a/cpuapp
 nrf54lm20dk_DTSI := dts/nordic/nrf54lm20dk.dtsi
+nrf54lm20dk_BOARD_ID := nordic_nrf54lm20dk
 
 nrf7002dk_BOARD := nrf7002dk/nrf5340/cpuapp
 nrf7002dk_DTSI := dts/nordic/nrf7002dk.dtsi
+nrf7002dk_BOARD_ID := nordic_nrf7002dk
 
 nucleo_n657x0_q_BOARD := nucleo_n657x0_q/stm32n657xx
 nucleo_n657x0_q_DTSI := dts/st/nucleo_n657x0_q.dtsi
+nucleo_n657x0_q_BOARD_ID := st_nucleo_n657x0_q
 
 nucleo_u575zi_q_BOARD := nucleo_u575zi_q/stm32u575xx
 nucleo_u575zi_q_DTSI := dts/st/nucleo_u575zi_q.dtsi
+nucleo_u575zi_q_BOARD_ID := st_nucleo_u575zi_q
 
 siwx917_dk2605a_BOARD := siwx917_dk2605a
 siwx917_dk2605a_DTSI := dts/silabs/siwx917_dk2605a.dtsi
+siwx917_dk2605a_BOARD_ID := silabs_siwx917_dk2605a
 
 stm32h750b_dk_BOARD := stm32h750b_dk/stm32h750xx/ext_flash_app
 stm32h750b_dk_DTSI := dts/st/stm32h750b_dk.dtsi
+stm32h750b_dk_BOARD_ID := st_stm32h750b_dk
 
 stm32h7b3i_dk_BOARD := stm32h7b3i_dk
 stm32h7b3i_dk_DTSI := dts/st/stm32h7b3i_dk.dtsi
+stm32h7b3i_dk_BOARD_ID := st_stm32h7b3i_dk
 
 stm32wba65i_dk1_BOARD := stm32wba65i_dk1
 stm32wba65i_dk1_DTSI := dts/st/stm32wba65i_dk1.dtsi
+stm32wba65i_dk1_BOARD_ID := st_stm32wba65i_dk1
 

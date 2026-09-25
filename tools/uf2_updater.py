@@ -2,15 +2,15 @@
 """UF2 helpers for the standalone Adaboot build.
 
 A board's bootloader is "UF2-capable" when its board-specific conf fragment
-(``conf/<key>.conf``) enables ``CONFIG_MCUBOOT_UF2=y``. Only those bootloaders
-present a USB mass-storage drive you can drag a ``.uf2`` onto, so only their
-updaters are worth shipping as ``.uf2``.
+(``conf/<vendor>/<key>.conf``) enables ``CONFIG_MCUBOOT_UF2=y``. Only those
+bootloaders present a USB mass-storage drive you can drag a ``.uf2`` onto, so
+only their updaters are worth shipping as ``.uf2``.
 
 This module backs the Makefile's ``uf2`` / ``all-uf2`` targets:
 
 list
-    Print every partition key whose bootloader conf enables UF2 (the set
-    ``make all-uf2`` builds a ``.uf2`` updater for).
+    Print every board id (``<vendor>_<board>``) whose bootloader conf enables
+    UF2 (the set ``make all-uf2`` builds a ``.uf2`` updater for).
 
 base <updater-build-dir>
     Print the slot0 flash offset (``fa_off``) the UF2 bootloader writes
@@ -36,9 +36,33 @@ MODULE_DIR = pathlib.Path(__file__).resolve().parent.parent
 CONF_DIR = MODULE_DIR / "conf"
 BOARDS_TOML = MODULE_DIR / "tools" / "boards.toml"
 
-# python-devicetree ships inside the Adafruit Zephyr checkout the standalone
-# build fetches under deps/zephyr (the workspace `make workspace` creates).
-PYDT_SRC = MODULE_DIR / "deps" / "zephyr" / "scripts" / "dts" / "python-devicetree" / "src"
+# python-devicetree ships inside the Zephyr checkout; _pydt_src() locates it
+# from the build's CMakeCache (or the standalone deps/zephyr fallback).
+
+
+def _pydt_src(build_dir):
+    """Locate Zephyr's python-devicetree sources.
+
+    Preferred: the Zephyr checkout the build actually used, from the build's
+    CMakeCache (ZEPHYR_BASE) -- this works wherever the west workspace lives
+    (this fork's own deps/ layout, or an application workspace such as
+    CircuitPython's zephyr-cp port whose Zephyr checkout is elsewhere in the
+    repo). Falls back to the standalone `make workspace` layout (deps/zephyr).
+    """
+    # CMakeCache.txt sits at the build-dir root for plain (non-sysbuild)
+    # builds and under zephyr/ for sysbuild image build dirs.
+    for cache in (pathlib.Path(build_dir) / "CMakeCache.txt",
+                  pathlib.Path(build_dir) / "zephyr" / "CMakeCache.txt"):
+        if not cache.exists():
+            continue
+        for line in cache.read_text(errors="replace").splitlines():
+            if line.startswith("ZEPHYR_BASE:PATH="):
+                pydt = (pathlib.Path(line.split("=", 1)[1].strip())
+                        / "scripts" / "dts" / "python-devicetree" / "src")
+                if pydt.exists():
+                    return pydt
+                break
+    return MODULE_DIR / "deps" / "zephyr" / "scripts" / "dts" / "python-devicetree" / "src"
 
 
 def _load_boards():
@@ -49,12 +73,12 @@ def _load_boards():
 
 
 def cmd_list():
-    """Print every mcuboot board whose conf/<key>.conf enables UF2."""
+    """Print every mcuboot board whose conf/<vendor>/<key>.conf enables UF2."""
     boards = _load_boards()
     for key in boards:
         if not boards[key].get("mcuboot", True):
             continue
-        conf = CONF_DIR / f"{key}.conf"
+        conf = CONF_DIR / boards[key].get("vendor", "") / f"{key}.conf"
         if not conf.exists():
             continue
         text = conf.read_text()
@@ -68,17 +92,23 @@ def cmd_list():
                 enabled = True
                 break
         if enabled:
-            print(key)
+            vendor = boards[key].get("vendor")
+            if not vendor or key.startswith(f"{vendor}_"):
+                print(key)
+            else:
+                print(f"{vendor}_{key}")
     return 0
 
 
 def _load_edt(updater_dir):
-    if not PYDT_SRC.exists():
+    pydt_src = _pydt_src(updater_dir)
+    if not pydt_src.exists():
         raise SystemExit(
-            f"error: {PYDT_SRC} not found -- run 'make workspace' first to fetch "
-            "the Adafruit Zephyr checkout (it ships python-devicetree)."
+            f"error: python-devicetree sources not found (looked in {pydt_src}) "
+            "-- run 'make workspace' first to fetch the Adafruit Zephyr "
+            "checkout (it ships python-devicetree)."
         )
-    sys.path.insert(0, str(PYDT_SRC))
+    sys.path.insert(0, str(pydt_src))
     import pickle  # needs the sys.path tweak above
 
     edt_pickle = pathlib.Path(updater_dir) / "zephyr" / "edt.pickle"

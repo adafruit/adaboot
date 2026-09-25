@@ -29,3 +29,31 @@
 		};
 	};
 };
+
+&mx25r64 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		nvm_partition: partition@0 {
+			label = "nvm";
+			reg = <0x0 DT_SIZE_K(4)>;
+		};
+
+		slot1_partition: partition@1000 {
+			label = "image-1";
+			reg = <0x1000 DT_SIZE_K(960)>;
+		};
+
+		storage_partition: partition@f1000 {
+			label = "storage";
+			reg = <0xf1000 DT_SIZE_K(32)>;
+		};
+
+		fatfs_partition: partition@f9000 {
+			label = "filesystem";
+			reg = <0xf9000 DT_SIZE_K(7196)>;
+		};
+	};
+};

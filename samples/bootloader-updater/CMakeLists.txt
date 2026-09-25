@@ -29,12 +29,12 @@ set(MCUBOOT_IMAGE_BIN "" CACHE FILEPATH
 if(NOT MCUBOOT_IMAGE_BIN)
     message(FATAL_ERROR
         "MCUBOOT_IMAGE_BIN is not set. Point it at a mcuboot.bin, e.g. the one "
-        "produced by `make build BOARD=<key>` (build-<key>/mcuboot.bin).")
+        "produced by `make build BOARD=<vendor>_<board>` (build-<vendor>_<board>/mcuboot.bin).")
 endif()
 if(NOT EXISTS "${MCUBOOT_IMAGE_BIN}")
     message(FATAL_ERROR
         "MCUBOOT_IMAGE_BIN does not exist: '${MCUBOOT_IMAGE_BIN}'. "
-        "Build the bootloader first with `make build BOARD=<key>`.")
+        "Build the bootloader first with `make build BOARD=<vendor>_<board>`.")
 endif()
 get_filename_component(MCUBOOT_IMAGE_BIN_ABS "${MCUBOOT_IMAGE_BIN}" ABSOLUTE)
 message(STATUS "Bootloader updater: embedding ${MCUBOOT_IMAGE_BIN_ABS}")

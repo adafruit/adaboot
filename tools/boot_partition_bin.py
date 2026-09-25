@@ -38,16 +38,40 @@ import shutil
 import sys
 
 MODULE_DIR = pathlib.Path(__file__).resolve().parent.parent
-PYDT_SRC = MODULE_DIR / "deps" / "zephyr" / "scripts" / "dts" / "python-devicetree" / "src"
+def _pydt_src(build_dir):
+    """Locate Zephyr's python-devicetree sources.
+
+    Preferred: the Zephyr checkout the build actually used, taken from the
+    build's CMakeCache (ZEPHYR_BASE). That works wherever the west workspace
+    lives -- this fork's own deps/ layout, or an application workspace such as
+    CircuitPython's zephyr-cp port, whose Zephyr checkout is elsewhere in the
+    repo. Falls back to the standalone `make workspace` layout (deps/zephyr).
+    """
+    # CMakeCache.txt sits at the build-dir root for plain (non-sysbuild)
+    # builds and under zephyr/ for sysbuild image build dirs.
+    for cache in (pathlib.Path(build_dir) / "CMakeCache.txt",
+                  pathlib.Path(build_dir) / "zephyr" / "CMakeCache.txt"):
+        if not cache.exists():
+            continue
+        for line in cache.read_text(errors="replace").splitlines():
+            if line.startswith("ZEPHYR_BASE:PATH="):
+                pydt = (pathlib.Path(line.split("=", 1)[1].strip())
+                        / "scripts" / "dts" / "python-devicetree" / "src")
+                if pydt.exists():
+                    return pydt
+                break
+    return MODULE_DIR / "deps" / "zephyr" / "scripts" / "dts" / "python-devicetree" / "src"
 
 
 def _load_edt(build_dir):
-    if not PYDT_SRC.exists():
+    pydt_src = _pydt_src(build_dir)
+    if not pydt_src.exists():
         raise SystemExit(
-            f"error: {PYDT_SRC} not found -- run 'make workspace' first to fetch "
-            "the Adafruit Zephyr checkout (it ships python-devicetree)."
+            f"error: python-devicetree sources not found (looked in {pydt_src}) "
+            "-- run 'make workspace' first to fetch the Adafruit Zephyr "
+            "checkout (it ships python-devicetree)."
         )
-    sys.path.insert(0, str(PYDT_SRC))
+    sys.path.insert(0, str(pydt_src))
 
     edt_pickle = pathlib.Path(build_dir) / "zephyr" / "edt.pickle"
     if not edt_pickle.exists():

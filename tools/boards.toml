@@ -118,6 +118,9 @@ vendor = "nxp"
 [boards.nrf5340dk]
 board = "nrf5340dk/nrf5340/cpuapp"
 vendor = "nordic"
+# Slot1 (and the filesystem) live on the external NOR; the
+# bootloader swaps the BLE-OTA-uploaded image in.
+mcuboot_mode = "swap_using_offset"
 
 [boards.nrf5340dk.external_flash]
 label = "mx25r64"
@@ -134,6 +137,9 @@ erase_block_size = 4096
 [boards.nrf54l15dk]
 board = "nrf54l15dk/nrf54l15/cpuapp"
 vendor = "nordic"
+# The layout moves slot1 (+ the filesystem) onto the external NOR so the app
+# can OTA-update itself over BLE (SMP/MCUmgr); the bootloader swaps it in.
+mcuboot_mode = "swap_using_offset"
 
 [boards.nrf54l15dk.external_flash]
 label = "mx25r64"
@@ -142,6 +148,9 @@ erase_block_size = 4096
 [boards.nrf54lm20dk]
 board = "nrf54lm20dk/nrf54lm20a/cpuapp"
 vendor = "nordic"
+# Slot1 (and the filesystem) live on the external NOR; the
+# bootloader swaps the BLE-OTA-uploaded image in.
+mcuboot_mode = "swap_using_offset"
 
 [boards.nrf54lm20dk.external_flash]
 label = "mx25r64"
@@ -150,6 +159,9 @@ erase_block_size = 4096
 [boards.nrf7002dk]
 board = "nrf7002dk/nrf5340/cpuapp"
 vendor = "nordic"
+# Slot1 (and the filesystem) live on the external NOR; the
+# bootloader swaps the BLE-OTA-uploaded image in.
+mcuboot_mode = "swap_using_offset"
 
 # Adaboot builds to ~63 KB; 68 KB leaves a little room to grow. The rest
 # of the 1 MB internal flash goes to the app slot: CircuitPython's image

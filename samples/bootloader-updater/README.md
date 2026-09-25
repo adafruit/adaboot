@@ -11,11 +11,11 @@ ordinary application and the bootloader updates itself.
 
 ## How it works
 
-1. `make build BOARD=<key>` builds the bootloader into `build-<key>/mcuboot.bin`.
-2. `make updater BOARD=<key>` builds this application with that `mcuboot.bin`
+1. `make build BOARD=<vendor>_<board>` builds the bootloader into `build-<vendor>_<board>/mcuboot.bin`.
+2. `make updater BOARD=<vendor>_<board>` builds this application with that `mcuboot.bin`
    embedded as a C array (`mcuboot_image[]` in `src/main.c`, generated from
    `mcuboot.bin` by `generate_inc_file_for_target` in `CMakeLists.txt`).
-3. Flash `build-<key>-updater/zephyr/zephyr.signed.bin` to **slot0** -- via UF2
+3. Flash `build-<vendor>_<board>-updater/zephyr/zephyr.signed.bin` to **slot0** -- via UF2
    drag-and-drop, serial recovery, or a debugger -- exactly like any other
    application image.
 4. mcuboot validates and boots the updater. The updater:
@@ -37,7 +37,7 @@ hash-only bootloader this fork builds by default
 From the repo root (after `make workspace`):
 
 ```
-make updater BOARD=nrf54l15dk
+make updater BOARD=nordic_nrf54l15dk
 ```
 
 This runs `make build` first (to produce the embedded `mcuboot.bin`) and then
@@ -47,12 +47,12 @@ builds the updater. Output:
 build-nrf54l15dk-updater/zephyr/zephyr.signed.bin
 ```
 
-Flash that to slot0. For a UF2-capable bootloader (`conf/<key>.conf` with
-`CONFIG_MCUBOOT_UF2=y`), `make uf2 BOARD=<key>` instead produces a
+Flash that to slot0. For a UF2-capable bootloader (`conf/<vendor>/<key>.conf` with
+`CONFIG_MCUBOOT_UF2=y`), `make uf2 BOARD=<vendor>_<board>` instead produces a
 `.uf2` you can drag onto the bootloader's USB drive:
 
 ```
-make uf2 BOARD=nrf54lm20dk
+make uf2 BOARD=nordic_nrf54lm20dk
 # -> build-nrf54lm20dk-updater/mcuboot-updater.uf2
 ```
 

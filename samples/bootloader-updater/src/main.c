@@ -11,9 +11,9 @@
  * partition with it -- i.e. it self-updates the bootloader.
  *
  * Workflow:
- *   1. Build the bootloader:        make build BOARD=<key>
- *   2. Build this updater:         make updater BOARD=<key>
- *   3. Flash build-<key>-updater/zephyr/zephyr.signed.bin to slot0 (UF2 /
+ *   1. Build the bootloader:        make build BOARD=<vendor>_<board>
+ *   2. Build this updater:         make updater BOARD=<vendor>_<board>
+ *   3. Flash build-<vendor>_<board>-updater/zephyr/zephyr.signed.bin to slot0 (UF2 /
  *      serial recovery / debugger). mcuboot boots it.
  *   4. The updater erases the boot partition, writes the embedded mcuboot
  *      image, verifies it, then reboots.

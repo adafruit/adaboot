@@ -25,25 +25,37 @@
 		slot0_partition: partition@20000 {
 			compatible = "zephyr,mapped-partition";
 			label = "image-0";
-			reg = <0x20000 DT_SIZE_K(1356)>;
+			reg = <0x20000 DT_SIZE_K(1360)>;
 		};
 
-		storage_partition: partition@173000 {
-			compatible = "zephyr,mapped-partition";
-			label = "storage";
-			reg = <0x173000 DT_SIZE_K(32)>;
-		};
-
-		nvm_partition: partition@17b000 {
+		nvm_partition: partition@174000 {
 			compatible = "zephyr,mapped-partition";
 			label = "nvm";
-			reg = <0x17b000 DT_SIZE_K(4)>;
+			reg = <0x174000 DT_SIZE_K(4)>;
 		};
 
-		littlefs_partition: partition@17c000 {
+		storage_partition: partition@175000 {
 			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x175000 DT_SIZE_K(32)>;
+		};
+	};
+};
+
+&mx25r64 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		slot1_partition: partition@0 {
+			label = "image-1";
+			reg = <0x0 DT_SIZE_K(1364)>;
+		};
+
+		littlefs_partition: partition@155000 {
 			label = "filesystem";
-			reg = <0x17c000 DT_SIZE_K(4)>;
+			reg = <0x155000 DT_SIZE_K(6828)>;
 		};
 	};
 };

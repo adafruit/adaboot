@@ -61,7 +61,7 @@ jobs:
           fi
           matrix=$(python3 -c 'import json, sys; print(json.dumps({"board": sys.argv[1:]}))' "${boards[@]}")
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          # UF2-capable boards (conf/<key>.conf enables CONFIG_MCUBOOT_UF2=y):
+          # UF2-capable boards (conf/<vendor>/<key>.conf enables CONFIG_MCUBOOT_UF2=y):
           # these get an extra `make uf2` step + a .uf2 artifact.
           mapfile -t uf2_boards < <(python3 tools/uf2_updater.py list)
           uf2=$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "${uf2_boards[@]}")
