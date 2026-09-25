@@ -231,8 +231,24 @@ board = "rpi_pico"
 vendor = "raspberrypi"
 mcuboot = false
 
+[boards.rpi_pico_w]
+# WiFi-equipped variant: needs a larger code partition to hold the CYW43 blob,
+# so it gets its own layout keyed on the qualified Zephyr board id. Without
+# this entry the W build would pick up boards.rpi_pico's 1016 KB code partition
+# and refuse to link. The sysbuild.cmake lookup prefers MCUBOOT_LAYOUT_<full
+# board id with / -> _> over the bare name when both are registered.
+board = "rpi_pico/rp2040/w"
+vendor = "raspberrypi"
+mcuboot = false
+
 [boards.rpi_pico2]
 board = "rpi_pico2"
+vendor = "raspberrypi"
+mcuboot = false
+
+[boards.rpi_pico2_w]
+# RP2350 WiFi variant, same role as rpi_pico_w for the RP2040 generation.
+board = "rpi_pico2/rp2350a/m33/w"
 vendor = "raspberrypi"
 mcuboot = false
 

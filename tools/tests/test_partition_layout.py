@@ -24,14 +24,17 @@ from partition_layout import (
     render_bar,
     render_detail_lines,
     generate_partitions_dtsi,
+    generate_mapped_split_dtsi,
     mapped_partition_devices,
     plan_partitions,
+    plan_code_partition_split,
     _has_predefined_mcuboot,
     discover_all_flash,
     get_erase_size,
     get_total_size,
     has_native_usb,
     filesystem_node_label,
+    DTS_OUT_DIR,
     ZEPHYR_BASE,
 )
 
@@ -1141,3 +1144,189 @@ class TestPredefinedMcuboot:
         assert fs[2] != 0x118000  # not the old overlay offset
         # ...and the node label is regenerated under its new name
         assert fs[1] == "littlefs_partition"
+
+# ── Unit tests: code_partition split (shared-flash boards) ───────────────
+
+_UPSTREAM_DTS = str(ZEPHYR_BASE / "boards" / "silabs" / "board.dts")
+_GENERATED_DTSI = str(DTS_OUT_DIR / "silabs" / "siwx917_dk2605a-partitions.dtsi")
+
+
+def _shared_flash_edt(with_generated=False):
+    """Build a fake EDT of the SiWx917 shared-flash topology.
+
+    flash0 carries the upstream ``code_partition`` (the M4's region inside
+    the NWP-owned flash) and the settings ``storage`` partition in the
+    region tail. With ``with_generated``, the upstream code partition is
+    replaced by the fork's previously generated layout (boot / slot0
+    carrying the code_partition label / filesystem), mimicking the EDT of
+    a --fix re-run, where the generated overlay has deleted the upstream
+    node.
+    """
+    flash = SimpleNamespace(
+        name="flash@8000000",
+        labels=["flash0"],
+        props={
+            "reg": _prop([0x08000000, 8 * MB]),
+            "erase-block-size": _prop(4096),
+        },
+        compats=["soc-nv-flash"],
+        children={},
+        filename=_UPSTREAM_DTS,
+        parent=None,
+    )
+    partitions_node = SimpleNamespace(
+        name="partitions",
+        labels=[],
+        props={},
+        compats=[],
+        children={},
+        filename=_UPSTREAM_DTS,
+        parent=flash,
+    )
+    flash.children["partitions"] = partitions_node
+
+    nodes = [flash, partitions_node]
+
+    def add_part(label, node_labels, offset, size, filename):
+        node = SimpleNamespace(
+            name=f"partition@{offset:x}",
+            labels=list(node_labels),
+            props={"label": _prop(label), "reg": _prop([offset, size])},
+            compats=["zephyr,mapped-partition"],
+            children={},
+            filename=filename,
+            parent=partitions_node,
+        )
+        partitions_node.children[node.name] = node
+        nodes.append(node)
+        return node
+
+    if with_generated:
+        add_part("mcuboot", ["boot_partition"], 0x202000, 128 * KB, _GENERATED_DTSI)
+        add_part(
+            "image-0",
+            ["slot0_partition", "code_partition"],
+            0x222000,
+            1 * MB,
+            _GENERATED_DTSI,
+        )
+        add_part(
+            "filesystem", ["littlefs_partition"], 0x322000, 852 * KB, _GENERATED_DTSI
+        )
+        add_part("nvm", ["nvm_partition"], 0x3F7000, 4 * KB, _GENERATED_DTSI)
+    else:
+        add_part(
+            "code_partition", ["code_partition"], 0x202000, 2008 * KB, _UPSTREAM_DTS
+        )
+    add_part("storage", ["storage_partition"], 0x3F8000, 32 * KB, _UPSTREAM_DTS)
+    return _make_edt(*nodes)
+
+
+class TestCodePartitionSplit:
+    def test_split_carves_filesystem(self):
+        """The split gives slot0 1 MB and the filesystem the rest, stopping
+        at the upstream storage partition in the region tail."""
+        edt = _shared_flash_edt()
+        split = plan_code_partition_split(edt)
+        assert split is not None
+        assert split["boot"] == ("mcuboot", "boot_partition", 0x202000, 128 * KB)
+        slot0_label, slot0_labels, slot0_off, slot0_size = split["slot0"]
+        assert (slot0_label, slot0_off, slot0_size) == ("image-0", 0x222000, 1 * MB)
+        # slot0 carries the upstream label so the board's chosen resolves.
+        assert "code_partition" in slot0_labels
+        assert split["filesystem"] == (
+            "filesystem",
+            "littlefs_partition",
+            0x322000,
+            852 * KB,
+        )
+        # One erase page of nvm closes the region, just below storage.
+        assert split["nvm"] == ("nvm", "nvm_partition", 0x3F7000, 4 * KB)
+        # The filesystem ends exactly where nvm begins and nvm ends where
+        # the upstream storage begins.
+        assert 0x322000 + 852 * KB == 0x3F7000
+        # The delete must name the label real builds define.
+        assert split["delete_labels"][0] == "code_partition"
+        # The upstream storage partition is documented as preserved; the
+        # replaced code partition is not.
+        preserved_labels = [p[1] for p in split["preserved"]]
+        assert "storage_partition" in preserved_labels
+        assert "code_partition" not in preserved_labels
+
+    def test_split_rerun_is_idempotent(self):
+        """A --fix re-run (previous generated layout in the EDT) reproduces
+        the same geometry instead of taking the predefined path and
+        hollowing out the layout."""
+        first = plan_code_partition_split(_shared_flash_edt())
+        rerun = plan_code_partition_split(_shared_flash_edt(with_generated=True))
+        assert first is not None and rerun is not None
+        assert rerun["boot"] == first["boot"]
+        assert rerun["slot0"] == first["slot0"]
+        assert rerun["filesystem"] == first["filesystem"]
+        assert rerun["nvm"] == first["nvm"]
+        assert rerun["preserved"] == first["preserved"]
+        assert rerun["delete_labels"][0] == "code_partition"
+
+    def test_split_skipped_for_upstream_mcuboot(self):
+        """A board with a genuine upstream mcuboot layout is left to the
+        predefined path."""
+        edt = _shared_flash_edt()
+        flash = edt.nodes[0]
+        partitions_node = flash.children["partitions"]
+
+        def add_upstream(label, node_label, offset, size):
+            node = SimpleNamespace(
+                name=f"partition@{offset:x}",
+                labels=[node_label],
+                props={"label": _prop(label), "reg": _prop([offset, size])},
+                compats=["zephyr,mapped-partition"],
+                children={},
+                filename=_UPSTREAM_DTS,
+                parent=partitions_node,
+            )
+            edt.nodes.append(node)
+
+        add_upstream("mcuboot", "boot_partition", 0x0, 128 * KB)
+        add_upstream("image-0", "slot0_partition", 0x20000, 1 * MB)
+        assert plan_code_partition_split(edt) is None
+
+    def test_split_slot_size_pin(self):
+        """A boards.toml slot_size pin shrinks slot0; the filesystem grows."""
+        edt = _shared_flash_edt()
+        split = plan_code_partition_split(edt, slot_size_kb=512)
+        assert split["slot0"][2:] == (0x222000, 512 * KB)
+        fs_label, _, fs_off, fs_size = split["filesystem"]
+        assert fs_label == "filesystem"
+        assert fs_off == 0x222000 + 512 * KB
+        assert fs_off + fs_size == split["nvm"][2]
+        assert split["nvm"][2] + split["nvm"][3] == 0x3F8000
+
+    def test_split_filesystem_size_pin(self):
+        """A boards.toml filesystem_size pin caps the filesystem; slot0
+        fills the middle."""
+        edt = _shared_flash_edt()
+        split = plan_code_partition_split(edt, filesystem_size_kb=512)
+        assert split["slot0"][2:] == (0x222000, 1364 * KB)
+        assert split["filesystem"][3] == 512 * KB
+        assert split["filesystem"][2] == 0x222000 + 1364 * KB
+        assert split["filesystem"][2] + 512 * KB == split["nvm"][2]
+
+    def test_split_dtsi_emits_all_partitions(self):
+        """The emitted overlay deletes the upstream code partition once and
+        defines boot, slot0 and filesystem nodes."""
+        edt = _shared_flash_edt()
+        split = plan_code_partition_split(edt)
+        content = generate_mapped_split_dtsi(split)
+        assert content.count("/delete-node/") == 1
+        assert "/delete-node/ &code_partition;" in content
+        assert "boot_partition: partition@202000" in content
+        assert "slot0_partition: code_partition: partition@222000" in content
+        assert "littlefs_partition: partition@322000" in content
+        assert 'label = "filesystem";' in content
+        # One erase page of nvm sits between the filesystem and storage.
+        assert "nvm_partition: partition@3f7000" in content
+        assert 'label = "nvm";' in content
+        # The preserved upstream partitions are documented in a comment, not
+        # re-emitted as nodes.
+        assert "storage (storage_partition): 0x3f8000 + DT_SIZE_K(32)" in content
+        assert "storage_partition: partition@" not in content

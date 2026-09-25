@@ -159,6 +159,13 @@ config MCUBOOT_UF2_ENTRANCE_BOOT_MODE
 
 config MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP
 	bool "Double tap reset detection for UF2"
+	# Every board with an entrance button (mcuboot-button0) does the
+	# button wait: the double-tap window is the boot-time wait window that
+	# polls the button (see boot_wait_for_update()), mirroring
+	# Adafruit_nRF52_Bootloader, which also waits once per boot and serves
+	# DFU from the same window. Boards without a button keep instant
+	# entrance checks only.
+	default y if $(dt_alias_enabled,mcuboot-button0)
 	depends on RETENTION_BOOT_MODE
 	help
 	  Detect a double tap of the reset button to enter UF2

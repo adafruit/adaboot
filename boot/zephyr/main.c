@@ -198,9 +198,11 @@ void zephyr_boot_log_stop(void)
 /* Is there a boot-time wait window at all? One single window covers every
  * entrance that needs waiting for: the double reset (retention flag) and the
  * serial DFU wait (BOOT_SERIAL_WAIT_FOR_DFU) used to be two sequential waits;
- * see boot_wait_for_update(). Boards without either keep the previous
- * instant-entrance checks (and the application boot-mode request check
- * further down in main()). */
+ * see boot_wait_for_update(). Both double-tap Kconfigs default on for boards
+ * with an entrance button (mcuboot-button0), so those boards always wait and
+ * poll the button; boards without one keep the previous instant-entrance
+ * checks (and the application boot-mode request check further down in
+ * main()). */
 #if defined(CONFIG_BOOT_SERIAL_DOUBLE_TAP) || defined(CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP) \
     || defined(CONFIG_BOOT_SERIAL_WAIT_FOR_DFU)
 #define MCUBOOT_UPDATE_WAIT_WINDOW

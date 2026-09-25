@@ -6,6 +6,10 @@
  * Flash is 4 MB on the Raspberry Pi Pico 2. RP2350 has no separate
  * second_stage_bootloader partition (the bootloader lives below 0x0 in the
  * bootrom), so code starts at 0x0.
+ *
+ * The non-W Picos (1020 KB code) and W Picos (1532 KB code to fit the CYW43
+ * blob) have different layouts; the W variant is in dts/rpi_pico2_w.dtsi and
+ * sysbuild.cmake picks the one whose key matches the Zephyr board id first.
  */
 &flash0 {
 	partitions {
@@ -15,26 +19,26 @@
 		code_partition: partition@0 {
 			compatible = "zephyr,mapped-partition";
 			label = "code-partition";
-			reg = <0x0 0x180000>;
+			reg = <0x0 (0xfe000 - 0x0)>;
 			read-only;
 		};
 
-		nvm_partition: partition@180000 {
-			compatible = "zephyr,mapped-partition";
-			label = "nvm";
-			reg = <0x180000 0x800>;
-		};
-
-		storage_partition: partition@180800 {
+		storage_partition: partition@fe000 {
 			compatible = "zephyr,mapped-partition";
 			label = "storage";
-			reg = <0x180800 0x800>;
+			reg = <0xfe000 0x1000>;
 		};
 
-		fatfs_partition: partition@181000 {
+		nvm_partition: partition@ff000 {
+			compatible = "zephyr,mapped-partition";
+			label = "nvm";
+			reg = <0xff000 0x1000>;
+		};
+
+		fatfs_partition: partition@100000 {
 			compatible = "zephyr,mapped-partition";
 			label = "filesystem";
-			reg = <0x181000 (DT_SIZE_M(4) - 0x181000)>;
+			reg = <0x100000 (DT_SIZE_M(4) - 0x100000)>;
 		};
 	};
 };

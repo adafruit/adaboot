@@ -381,6 +381,12 @@ config BOOT_SERIAL_PIN_RESET
 
 config BOOT_SERIAL_DOUBLE_TAP
 	bool "Double tap reset detection"
+	# Same policy as MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP: boards with an
+	# entrance button (mcuboot-button0) do the button wait; see there.
+	# Serial-only boards already get a wait window from
+	# BOOT_SERIAL_WAIT_FOR_DFU, but combined UF2 + CDC ACM builds do not,
+	# and the double-reset entrance is part of the Adafruit-style UX.
+	default y if $(dt_alias_enabled,mcuboot-button0)
 	depends on RETENTION_BOOT_MODE
 	help
 	  Detect a double tap of the reset button to enter serial recovery

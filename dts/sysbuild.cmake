@@ -14,11 +14,39 @@
 
 include(${CMAKE_CURRENT_LIST_DIR}/mcuboot_boards.cmake)
 
-# By now Zephyr has normalized BOARD to the bare board name (revision and
-# qualifiers live in BOARD_REVISION/BOARD_QUALIFIERS); strip anyway so this also
-# works if it is included from a context that still has the full board id.
+# Pick the layout that matches this Zephyr board id. The fork registers one
+# dtsi per dts/<vendor>/<board>.dtsi filename stem, and the dts/ tree may
+# carry both a bare-name entry (e.g. rpi_pico, the default for that
+# hardware) and one or more qualified entries (e.g. rpi_pico/rp2040/w) for
+# variants whose layout differs.
+#
+# At this point Zephyr has already run board aliases (the cp_board_alias
+# macro in board_aliases.cmake), so BOARD is the bare board name
+# (rpi_pico) and BOARD_QUALIFIERS holds the qualifier (rp2040/w). The
+# alias macro only fires when the user passed a CircuitPython-prefixed id
+# (e.g. raspberrypi_rpi_pico_w_zephyr) -- if they passed the canonical
+# Zephyr id directly (rpi_pico/rp2040/w) the bare name and qualifier
+# come from west's normal board resolution. Either way the full id is
+# `${BOARD}/${BOARD_QUALIFIERS}` with / rewritten to _ (and @ rewritten
+# to _, so Zephyr revisions like `mimxrt1170_evk@A` produce a valid CMake
+# cache variable name -- `${VAR}` does not handle `@`). Prefer the
+# variant entry when one is registered; otherwise fall back to the bare
+# name. A bare-name entry can also be missing (every dtsi lives under a
+# variant key), so the bare-name fallback is the optional one.
+set(adaboot_full_key "${BOARD}")
+if(DEFINED BOARD_QUALIFIERS AND NOT "${BOARD_QUALIFIERS}" STREQUAL "")
+  set(adaboot_full_key "${BOARD}/${BOARD_QUALIFIERS}")
+endif()
+string(REGEX REPLACE "/" "_" adaboot_full_key "${adaboot_full_key}")
+string(REPLACE "@" "_" adaboot_full_key "${adaboot_full_key}")
 string(REGEX REPLACE "[@/].*" "" adaboot_layout_key "${BOARD}")
-set(adaboot_layout "${MCUBOOT_LAYOUT_${adaboot_layout_key}}")
+set(adaboot_layout "${MCUBOOT_LAYOUT_${adaboot_full_key}}")
+if(NOT adaboot_layout)
+  set(adaboot_layout "${MCUBOOT_LAYOUT_${adaboot_layout_key}}")
+endif()
+# Keep adaboot_layout_key as the bare name even when a variant alias matched:
+# MCUBOOT_BOARDS (checked below) is keyed by bare name, so comparing the full
+# key against it would miss every board built with qualifiers.
 
 # Which partition an image links into is per-image, not per-board: the
 # application image links into the primary slot the bootloader boots, the

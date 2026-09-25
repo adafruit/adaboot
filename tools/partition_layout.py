@@ -1176,17 +1176,62 @@ def _partition_device(part_node):
     return None
 
 
+def _defined_in_fork_dts(node):
+    """True for nodes defined by this fork's own dts/ files.
+
+    The planning build applies the board's glue dtsi, which #includes the
+    previously generated <board>-partitions.dtsi when one exists. Nodes from
+    it are the planner's own earlier output, not upstream geometry to plan
+    against.
+    """
+    filename = getattr(node, "filename", "") or ""
+    if not filename:
+        return False
+    try:
+        pathlib.Path(filename).resolve().relative_to(DTS_OUT_DIR.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _has_upstream_predefined_mcuboot(edt):
+    """True if the board's upstream dts already defines a mcuboot layout.
+
+    Unlike _has_predefined_mcuboot, partitions from the fork's own generated
+    layout files do not count: the planning build picks them up through the
+    board glue's #include, and they are the split path's earlier output
+    rather than an upstream layout to keep.
+    """
+    labels = set()
+    for node in edt.nodes:
+        if _defined_in_fork_dts(node):
+            continue
+        label_prop = node.props.get("label")
+        if label_prop:
+            labels.add(label_prop.val)
+    return "mcuboot" in labels and "image-0" in labels
+
+
 def _find_code_partition_region(edt):
-    """Find the upstream app code partition mcuboot should split.
+    """Find the app code region mcuboot should split.
 
     Some boards boot via mcuboot but share their single flash with a ROM loader
     / network processor that owns most of it (e.g. SiWx917: the M4 only owns a
     ``code_partition`` sub-region the ROM loader jumps to). The board's upstream
     DTS labels that region ``code_partition`` as a ``zephyr,mapped-partition``.
-    This returns ``(dev_label, offset, size, node_labels, erase_size)`` for that
+    This returns ``(dev_label, base, size, node_labels, erase_size)`` for that
     partition, or ``None`` when there is no such partition (so this planning path
     is skipped for boards that own a whole device or already have a mcuboot
     layout upstream).
+
+    On a --fix re-run the upstream node is gone from the EDT (the previously
+    generated overlay deleted it) and the ``code_partition`` label rides on the
+    generated slot0 instead. That node is recognized by its source file; the
+    region's base is recovered from the generated boot partition and its size
+    is reported as None, leaving the surviving upstream partitions to bound
+    the split. Either way the split is planned from the same geometry, so
+    re-running --fix reproduces the same layout instead of flip-flopping
+    between the split and predefined paths.
     """
     for node in edt.nodes:
         if "zephyr,mapped-partition" not in getattr(node, "compats", []):
@@ -1200,46 +1245,152 @@ def _find_code_partition_region(edt):
         if dev is None:
             continue
         dev_label = dev.labels[0] if dev.labels else dev.name
-        return (dev_label, reg.val[0], reg.val[1], list(node.labels), get_erase_size(dev))
+        base, size = reg.val[0], reg.val[1]
+        if _defined_in_fork_dts(node):
+            boot_offset = None
+            for other in edt.nodes:
+                if "boot_partition" not in getattr(other, "labels", []):
+                    continue
+                if not _defined_in_fork_dts(other):
+                    continue
+                if _partition_device(other) is not dev:
+                    continue
+                boot_reg = other.props.get("reg")
+                if boot_reg and len(boot_reg.val) >= 2:
+                    boot_offset = boot_reg.val[0]
+                    break
+            if boot_offset is None:
+                continue
+            base, size = boot_offset, None
+        return (dev_label, base, size, list(node.labels), get_erase_size(dev))
     return None
 
 
-def plan_code_partition_split(edt, flash_overrides=None):
+def plan_code_partition_split(edt, flash_overrides=None, slot_size_kb=None,
+                              filesystem_size_kb=None):
     """Plan a single-app mcuboot layout within the board's upstream code region.
 
     For boards that share a flash with a ROM loader / network processor, the
     planner cannot plan the whole device (it would collide with the regions the
     loader owns). Instead it splits the board's existing ``code_partition``
     (a ``zephyr,mapped-partition``) into ``boot_partition`` + ``slot0_partition``
-    and emits a mapped-partition overlay that deletes the upstream
-    ``code_partition`` and replaces it. ``slot0_partition`` also carries the
-    upstream ``code_partition`` label so the board's ``zephyr,code-partition =
-    &code_partition`` chosen still resolves to it. All other upstream partitions
-    are left untouched.
+    + a filesystem partition, and emits a mapped-partition overlay that deletes
+    the upstream ``code_partition`` and replaces it. ``slot0_partition`` also
+    carries the upstream ``code_partition`` label so the board's
+    ``zephyr,code-partition = &code_partition`` chosen still resolves to it.
+
+    slot0 defaults to SLOT0_MIN_SIZE (1 MB) and the filesystem fills the rest
+    of the region; ``slot_size_kb`` pins slot0's size and ``filesystem_size_kb``
+    instead pins the filesystem's size, letting slot0 fill the middle. Other
+    upstream partitions are left untouched -- including any that live inside
+    the code region (e.g. the SiWx917 board's settings ``storage`` partition
+    in the region tail), which bound the filesystem from below.
 
     Returns a dict describing the split, or ``None`` if this board does not use
     this pattern (a predefined mcuboot layout exists upstream, or there is no
     ``code_partition`` region to split).
     """
-    if _has_predefined_mcuboot(edt, flash_overrides):
+    if _has_upstream_predefined_mcuboot(edt):
         return None
     region = _find_code_partition_region(edt)
     if region is None:
         return None
-    dev_label, base, total, upstream_labels, erase = region
+    dev_label, base, region_size, upstream_labels, erase = region
     boot_size = align_up(128 * KB, erase)
     slot0_offset = base + boot_size
-    slot0_size = align_down(total - boot_size, erase)
     slot0_labels = ["slot0_partition"] + [
         l for l in upstream_labels if l != "slot0_partition"
     ]
+
+    # Upstream partitions on the same device that follow the region's base
+    # (e.g. the SiWx917 settings ``storage`` partition in the region tail)
+    # are kept as-is, so the split must stop at the first one. Nodes from the
+    # fork's own generated layout are ignored: they are this path's earlier
+    # output, being regenerated.
+    tail_bound = base + region_size if region_size is not None else None
+    for node in edt.nodes:
+        if "zephyr,mapped-partition" not in getattr(node, "compats", []):
+            continue
+        if _defined_in_fork_dts(node):
+            continue
+        if set(getattr(node, "labels", [])) & set(upstream_labels):
+            continue  # the code partition itself
+        reg = node.props.get("reg")
+        if not reg or len(reg.val) < 2:
+            continue
+        dev = _partition_device(node)
+        if dev is None or dev_label not in getattr(dev, "labels", []):
+            continue
+        offset = reg.val[0]
+        if offset > base and (tail_bound is None or offset < tail_bound):
+            tail_bound = offset
+    if tail_bound is None:
+        # Nothing bounds the region (an earlier generated layout deleted the
+        # upstream partition that did); refuse to guess how far it runs.
+        return None
+
+    # Partitions inherited from the upstream dts and kept as-is: everything
+    # else on the device (the NWP / ROM-loader regions, the settings
+    # storage, ...). Not re-emitted, but documented in the generated dtsi so
+    # the full memory map is visible there.
+    preserved = []
+    for node in edt.nodes:
+        parent = getattr(node, "parent", None)
+        if parent is None or parent.name != "partitions":
+            continue
+        reg = node.props.get("reg")
+        if not reg or len(reg.val) < 2:
+            continue
+        if _defined_in_fork_dts(node):
+            continue
+        if set(getattr(node, "labels", [])) & set(upstream_labels):
+            continue  # the code partition being replaced
+        dev = _partition_device(node)
+        if dev is None or dev_label not in getattr(dev, "labels", []):
+            continue
+        label_prop = node.props.get("label")
+        node_label = node.labels[0] if node.labels else node.name
+        preserved.append(
+            (label_prop.val if label_prop else node_label,
+             node_label, reg.val[0], reg.val[1])
+        )
+    preserved.sort(key=lambda p: p[2])
+
+    # One erase page of raw NVM next to the settings storage in the tail
+    # (the fork's standard nvm placement; the filesystem cedes the page).
+    avail = tail_bound - erase - slot0_offset
+    if filesystem_size_kb is not None:
+        fs_size = align_up(filesystem_size_kb * KB, erase)
+        slot0_size = align_down(avail - fs_size, erase)
+    else:
+        slot0_size = align_up((slot_size_kb or SLOT0_MIN_SIZE // KB) * KB, erase)
+        # Keep at least one erase sector for the filesystem.
+        slot0_size = min(slot0_size, align_down(avail - erase, erase))
+        fs_size = align_down(avail - slot0_size, erase)
+    filesystem = None
+    if fs_size >= erase:
+        filesystem = (
+            "filesystem",
+            filesystem_node_label(edt),
+            slot0_offset + slot0_size,
+            fs_size,
+        )
+    nvm = ("nvm", "nvm_partition", tail_bound - erase, erase)
+    # The delete must name a label that exists in real builds too: the
+    # upstream node is ``code_partition`` there, while a --fix re-run finds
+    # the label on the generated slot0 (whose own labels don't exist in a
+    # fresh build).
+    delete_labels = sorted(upstream_labels, key=lambda l: l != "code_partition")
     return {
         "dev_label": dev_label,
         "erase": erase,
-        "region_size": total,
-        "delete_labels": upstream_labels,
+        "region_size": tail_bound - base,
+        "delete_labels": delete_labels,
         "boot": ("mcuboot", "boot_partition", base, boot_size),
         "slot0": ("image-0", slot0_labels, slot0_offset, slot0_size),
+        "filesystem": filesystem,
+        "nvm": nvm,
+        "preserved": preserved,
     }
 
 
@@ -1249,10 +1400,11 @@ def generate_mapped_split_dtsi(plan):
     boot_label, _boot_node, boot_off, boot_size = plan["boot"]
     slot0_label, slot0_labels, slot0_off, slot0_size = plan["slot0"]
     lines = []
-    # Delete the upstream app code partition(s) before re-adding so the new
-    # boot/slot0 nodes don't overlap the original region.
-    for lbl in plan["delete_labels"]:
-        lines.append(f"/delete-node/ &{lbl};")
+    # Delete the upstream app code partition before re-adding so the new
+    # boot/slot0 nodes don't overlap the original region. All of the node's
+    # labels name the same node, so one delete is enough (a second would
+    # dangle).
+    lines.append(f"/delete-node/ &{plan['delete_labels'][0]};")
     lines.append("")
     lines.append(f"&{dev} {{")
     lines.append("\tpartitions {")
@@ -1268,6 +1420,38 @@ def generate_mapped_split_dtsi(plan):
     lines.append(f'\t\t\tlabel = "{slot0_label}";')
     lines.append(f"\t\t\treg = <0x{slot0_off:x} {format_dt_size(slot0_size)}>;")
     lines.append("\t\t};")
+    filesystem = plan.get("filesystem")
+    if filesystem is not None:
+        fs_label, fs_node_label, fs_off, fs_size = filesystem
+        lines.append("")
+        lines.append(f"\t\t{fs_node_label}: partition@{fs_off:x} {{")
+        lines.append('\t\t\tcompatible = "zephyr,mapped-partition";')
+        lines.append(f'\t\t\tlabel = "{fs_label}";')
+        lines.append(f"\t\t\treg = <0x{fs_off:x} {format_dt_size(fs_size)}>;")
+        lines.append("\t\t};")
+    nvm = plan.get("nvm")
+    if nvm is not None:
+        nvm_label, nvm_node_label, nvm_off, nvm_size = nvm
+        lines.append("")
+        lines.append(f"\t\t{nvm_node_label}: partition@{nvm_off:x} {{")
+        lines.append('\t\t\tcompatible = "zephyr,mapped-partition";')
+        lines.append(f'\t\t\tlabel = "{nvm_label}";')
+        lines.append(f"\t\t\treg = <0x{nvm_off:x} {format_dt_size(nvm_size)}>;")
+        lines.append("\t\t};")
+    lines.append("")
+    # Why this layout has no slot1, and what surrounds the split region.
+    lines.append("\t\t/* Single-app layout: the rest of this flash is owned by the")
+    lines.append("\t\t * ROM loader / network processor (the partitions below), leaving")
+    lines.append("\t\t * no room for a second slot next to the filesystem. Updates are")
+    lines.append("\t\t * written straight into slot0 by the bootloader (UF2 / serial")
+    lines.append("\t\t * recovery) instead of a mcuboot slot1 swap.")
+    lines.append("\t\t *")
+    lines.append("\t\t * Inherited from the upstream dts and kept as-is")
+    lines.append("\t\t * (not re-emitted here):")
+    for label, node_label, off, size in plan.get("preserved", []):
+        lines.append(
+            f"\t\t *   {label} ({node_label}): 0x{off:x} + {format_dt_size(size)}")
+    lines.append("\t\t */")
     lines.append("\t};")
     lines.append("};")
     lines.append("")
@@ -1690,7 +1874,8 @@ def gen_mcuboot_boards_cmake():
     MCUBOOT_BOARDS, since their layout is hand-maintained and they do not boot
     via mcuboot.
     """
-    mcuboot_keys = sorted(k for k, v in load_boards_manifest().items() if v["mcuboot"])
+    boards = load_boards_manifest()
+    mcuboot_keys = sorted(k for k, v in boards.items() if v["mcuboot"])
     layouts = discover_layouts()
 
     missing = [k for k in mcuboot_keys if k not in layouts]
@@ -1700,6 +1885,19 @@ def gen_mcuboot_boards_cmake():
             " run --fix for them.",
             file=sys.stderr,
         )
+
+    # Variants: a boards.toml entry whose `board` field is a fully-qualified
+    # Zephyr board id (e.g. "rpi_pico/rp2040/w") rather than the bare name.
+    # The full id rewrites to a CMake cache variable name with `/` -> `_`
+    # (and `@` -> `_` -- `${VAR}` substitution does not handle `@`, which
+    # Zephyr uses for revisions like `mimxrt1170_evk@A`), matching the
+    # sysbuild.cmake lookup order: full id first, then bare.
+    variant_aliases = {}  # alias_key -> partition_key
+    for key, entry in boards.items():
+        if "/" not in entry["board"]:
+            continue
+        alias = entry["board"].replace("/", "_").replace("@", "_")
+        variant_aliases[alias] = key
 
     lines = [
         "# Auto-generated by tools/partition_layout.py --gen-list.",
@@ -1722,6 +1920,13 @@ def gen_mcuboot_boards_cmake():
             f'set(MCUBOOT_LAYOUT_{key} "${{CMAKE_CURRENT_LIST_DIR}}/{rel}"'
             f' CACHE INTERNAL "{key} partition layout")'
         )
+    for alias, key in sorted(variant_aliases.items()):
+        if key not in layouts:
+            continue
+        lines.append(
+            f'set(MCUBOOT_LAYOUT_{alias} "${{MCUBOOT_LAYOUT_{key}}}"'
+            f' CACHE INTERNAL "{alias} partition layout alias for {key}")'
+        )
     lines.append("")
     lines.append("set(MCUBOOT_LAYOUT_BOARDS")
     lines.extend(f"    {k}" for k in layouts)
@@ -1737,7 +1942,8 @@ def gen_mcuboot_boards_cmake():
     MCUBOOT_BOARDS_CMAKE.write_text("\n".join(lines) + "\n")
     print(
         f"  Wrote {MCUBOOT_BOARDS_CMAKE.relative_to(MODULE_DIR.parent)}"
-        f" ({len(layouts)} layouts, {len(mcuboot_keys)} via mcuboot)"
+        f" ({len(layouts)} layouts, {len(mcuboot_keys)} via mcuboot,"
+        f" {len(variant_aliases)} variant aliases)"
     )
 
 
@@ -2117,7 +2323,12 @@ def gen_all_sectors_conf():
             print(f"  Skipped {key} (cmake-only build failed; is the workspace set up?)",
                   file=sys.stderr)
             continue
-        split = plan_code_partition_split(edt, flash_overrides)
+        split = plan_code_partition_split(
+            edt,
+            flash_overrides,
+            slot_size_kb=entry.get("slot_size"),
+            filesystem_size_kb=entry.get("filesystem_size"),
+        )
         if split is not None:
             gen_sectors_conf(key, conf_vendor, [], nor_page_layout_kconfigs(edt),
                              split=split)
@@ -2226,7 +2437,12 @@ def fix_alignment(
     dtsi_dir = DTS_OUT_DIR / vendor
     partitions_path = dtsi_dir / f"{board_key}-partitions.dtsi"
 
-    split = plan_code_partition_split(edt, flash_overrides)
+    split = plan_code_partition_split(
+        edt,
+        flash_overrides,
+        slot_size_kb=slot_size_kb,
+        filesystem_size_kb=filesystem_size_kb,
+    )
     if split is not None:
         dev_label = split["dev_label"]
         erase = split["erase"]
@@ -2241,6 +2457,23 @@ def fix_alignment(
             f"    {slot0_label}: 0x{slot0_off:x} + {format_dt_size(slot0_size)}"
             f" ({format_size(slot0_size)}) [also: {', '.join(split['slot0'][1])}]"
         )
+        if split["filesystem"] is not None:
+            fs_label, _, fs_off, fs_size = split["filesystem"]
+            print(
+                f"    {fs_label}: 0x{fs_off:x} + {format_dt_size(fs_size)}"
+                f" ({format_size(fs_size)})"
+            )
+        if split.get("nvm") is not None:
+            nvm_label, _, nvm_off, nvm_size = split["nvm"]
+            print(
+                f"    {nvm_label}: 0x{nvm_off:x} + {format_dt_size(nvm_size)}"
+                f" ({format_size(nvm_size)})"
+            )
+        for label, node_label, off, size in split.get("preserved", []):
+            print(
+                f"    {label}: 0x{off:x} + {format_dt_size(size)}"
+                f" ({format_size(size)}) [upstream, kept]"
+            )
         print()
         content = partitions_dtsi_header(board_key, vendor) + "\n" + generate_mapped_split_dtsi(split)
         dtsi_dir.mkdir(parents=True, exist_ok=True)
@@ -2395,7 +2628,12 @@ def main():
             external_storage=entry.get("external_storage", False),
         )
     else:
-        split = plan_code_partition_split(edt, flash_overrides)
+        split = plan_code_partition_split(
+            edt,
+            flash_overrides,
+            slot_size_kb=entry.get("slot_size"),
+            filesystem_size_kb=entry.get("filesystem_size"),
+        )
         if split is not None:
             dev_label = split["dev_label"]
             erase = split["erase"]
@@ -2405,6 +2643,9 @@ def main():
             print(f"  {dev_label} ({format_size(region_size)} code region, shared-flash split)  erase page: {format_size(erase)}")
             print(f"    {boot_label}: 0x{boot_off:x} + {format_size(boot_size)}")
             print(f"    {slot0_label}: 0x{slot0_off:x} + {format_size(slot0_size)}")
+            if split["filesystem"] is not None:
+                fs_label, _, fs_off, fs_size = split["filesystem"]
+                print(f"    {fs_label}: 0x{fs_off:x} + {format_size(fs_size)}")
             print()
             print("  (upstream mapped-partitions kept; run --fix to write the overlay)")
             sys.exit(0)

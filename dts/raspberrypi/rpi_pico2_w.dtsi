@@ -1,0 +1,43 @@
+/* RP2350 UF2-native layout (no mcuboot): applied to the application image only.
+ *
+ * RP2350 W (Raspberry Pi Pico 2 W): the CYW43 WiFi blob is linked into the
+ * CircuitPython image, so the code partition grows from 1016 KB (the non-W
+ * rpi_pico2) to 1532 KB here. Flash is 4 MB. RP2350 has no separate
+ * second_stage_bootloader partition (the bootloader lives below 0x0 in the
+ * bootrom), so code starts at 0x0.
+ *
+ * sysbuild.cmake picks this dtsi over dts/rpi_pico2.dtsi when BOARD is
+ * rpi_pico2/rp2350a/m33/w, by trying MCUBOOT_LAYOUT_rpi_pico2_rp2350a_m33_w
+ * before MCUBOOT_LAYOUT_rpi_pico2.
+ */
+&flash0 {
+	partitions {
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		code_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "code-partition";
+			reg = <0x0 0x17f000>;
+			read-only;
+		};
+
+		storage_partition: partition@17f000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x17f000 0x1000>;
+		};
+
+		nvm_partition: partition@180000 {
+			compatible = "zephyr,mapped-partition";
+			label = "nvm";
+			reg = <0x180000 0x1000>;
+		};
+
+		fatfs_partition: partition@181000 {
+			compatible = "zephyr,mapped-partition";
+			label = "filesystem";
+			reg = <0x181000 (DT_SIZE_M(4) - 0x181000)>;
+		};
+	};
+};

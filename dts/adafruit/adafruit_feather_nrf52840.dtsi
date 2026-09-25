@@ -17,6 +17,14 @@
  * The internal flash hosts only app-side partitions (code/storage/nvm); the
  * Feather's entire 2 MB GD25Q16 SPI NOR is the user filesystem (the board has
  * native USB, so the node label is fatfs_partition).
+ *
+ * nvm_partition is 8 KB at 0xf2000: matches the regular Feather's
+ * CIRCUITPY_INTERNAL_NVM_SIZE default (8 KB) so check_partitions is clean
+ * there. The Bluefruit Sense overrides to 4 KB and expects the area to
+ * start at 0xf3000 (the upper half of the same erase sector); the
+ * Sense's writes land in the upper half of this region and the lower 4 KB
+ * are unused when switching from the zephyr-cp build to the nordic-port
+ * build. This was the state before the layout was moved into the fork.
  */
 &gd25q16 {
 	/delete-node/ partitions;

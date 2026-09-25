@@ -33,10 +33,29 @@ set(MCUBOOT_LAYOUT_nucleo_n657x0_q "${CMAKE_CURRENT_LIST_DIR}/st/nucleo_n657x0_q
 set(MCUBOOT_LAYOUT_nucleo_u575zi_q "${CMAKE_CURRENT_LIST_DIR}/st/nucleo_u575zi_q.dtsi" CACHE INTERNAL "nucleo_u575zi_q partition layout")
 set(MCUBOOT_LAYOUT_rpi_pico "${CMAKE_CURRENT_LIST_DIR}/raspberrypi/rpi_pico.dtsi" CACHE INTERNAL "rpi_pico partition layout")
 set(MCUBOOT_LAYOUT_rpi_pico2 "${CMAKE_CURRENT_LIST_DIR}/raspberrypi/rpi_pico2.dtsi" CACHE INTERNAL "rpi_pico2 partition layout")
+set(MCUBOOT_LAYOUT_rpi_pico2_w "${CMAKE_CURRENT_LIST_DIR}/raspberrypi/rpi_pico2_w.dtsi" CACHE INTERNAL "rpi_pico2_w partition layout")
+set(MCUBOOT_LAYOUT_rpi_pico_w "${CMAKE_CURRENT_LIST_DIR}/raspberrypi/rpi_pico_w.dtsi" CACHE INTERNAL "rpi_pico_w partition layout")
 set(MCUBOOT_LAYOUT_siwx917_dk2605a "${CMAKE_CURRENT_LIST_DIR}/silabs/siwx917_dk2605a.dtsi" CACHE INTERNAL "siwx917_dk2605a partition layout")
 set(MCUBOOT_LAYOUT_stm32h750b_dk "${CMAKE_CURRENT_LIST_DIR}/st/stm32h750b_dk.dtsi" CACHE INTERNAL "stm32h750b_dk partition layout")
 set(MCUBOOT_LAYOUT_stm32h7b3i_dk "${CMAKE_CURRENT_LIST_DIR}/st/stm32h7b3i_dk.dtsi" CACHE INTERNAL "stm32h7b3i_dk partition layout")
 set(MCUBOOT_LAYOUT_stm32wba65i_dk1 "${CMAKE_CURRENT_LIST_DIR}/st/stm32wba65i_dk1.dtsi" CACHE INTERNAL "stm32wba65i_dk1 partition layout")
+set(MCUBOOT_LAYOUT_adafruit_clue_nrf52840_nrf52840_uf2 "${MCUBOOT_LAYOUT_adafruit_clue_nrf52840}" CACHE INTERNAL "adafruit_clue_nrf52840_nrf52840_uf2 partition layout alias for adafruit_clue_nrf52840")
+set(MCUBOOT_LAYOUT_adafruit_feather_nrf52840_nrf52840_uf2 "${MCUBOOT_LAYOUT_adafruit_feather_nrf52840}" CACHE INTERNAL "adafruit_feather_nrf52840_nrf52840_uf2 partition layout alias for adafruit_feather_nrf52840")
+set(MCUBOOT_LAYOUT_frdm_mcxn947_mcxn947_cpu0 "${MCUBOOT_LAYOUT_frdm_mcxn947}" CACHE INTERNAL "frdm_mcxn947_mcxn947_cpu0 partition layout alias for frdm_mcxn947")
+set(MCUBOOT_LAYOUT_mimxrt1170_evk_A_mimxrt1176_cm7 "${MCUBOOT_LAYOUT_mimxrt1170_evk}" CACHE INTERNAL "mimxrt1170_evk_A_mimxrt1176_cm7 partition layout alias for mimxrt1170_evk")
+set(MCUBOOT_LAYOUT_native_sim_native "${MCUBOOT_LAYOUT_native_sim}" CACHE INTERNAL "native_sim_native partition layout alias for native_sim")
+set(MCUBOOT_LAYOUT_nrf5340bsim_nrf5340_cpuapp "${MCUBOOT_LAYOUT_nrf5340bsim}" CACHE INTERNAL "nrf5340bsim_nrf5340_cpuapp partition layout alias for nrf5340bsim")
+set(MCUBOOT_LAYOUT_nrf5340dk_nrf5340_cpuapp "${MCUBOOT_LAYOUT_nrf5340dk}" CACHE INTERNAL "nrf5340dk_nrf5340_cpuapp partition layout alias for nrf5340dk")
+set(MCUBOOT_LAYOUT_nrf54h20dk_nrf54h20_cpuapp "${MCUBOOT_LAYOUT_nrf54h20dk}" CACHE INTERNAL "nrf54h20dk_nrf54h20_cpuapp partition layout alias for nrf54h20dk")
+set(MCUBOOT_LAYOUT_nrf54l15dk_nrf54l15_cpuapp "${MCUBOOT_LAYOUT_nrf54l15dk}" CACHE INTERNAL "nrf54l15dk_nrf54l15_cpuapp partition layout alias for nrf54l15dk")
+set(MCUBOOT_LAYOUT_nrf54lm20bsim_nrf54lm20a_cpuapp "${MCUBOOT_LAYOUT_nrf54lm20bsim}" CACHE INTERNAL "nrf54lm20bsim_nrf54lm20a_cpuapp partition layout alias for nrf54lm20bsim")
+set(MCUBOOT_LAYOUT_nrf54lm20dk_nrf54lm20a_cpuapp "${MCUBOOT_LAYOUT_nrf54lm20dk}" CACHE INTERNAL "nrf54lm20dk_nrf54lm20a_cpuapp partition layout alias for nrf54lm20dk")
+set(MCUBOOT_LAYOUT_nrf7002dk_nrf5340_cpuapp "${MCUBOOT_LAYOUT_nrf7002dk}" CACHE INTERNAL "nrf7002dk_nrf5340_cpuapp partition layout alias for nrf7002dk")
+set(MCUBOOT_LAYOUT_nucleo_n657x0_q_stm32n657xx "${MCUBOOT_LAYOUT_nucleo_n657x0_q}" CACHE INTERNAL "nucleo_n657x0_q_stm32n657xx partition layout alias for nucleo_n657x0_q")
+set(MCUBOOT_LAYOUT_nucleo_u575zi_q_stm32u575xx "${MCUBOOT_LAYOUT_nucleo_u575zi_q}" CACHE INTERNAL "nucleo_u575zi_q_stm32u575xx partition layout alias for nucleo_u575zi_q")
+set(MCUBOOT_LAYOUT_rpi_pico2_rp2350a_m33_w "${MCUBOOT_LAYOUT_rpi_pico2_w}" CACHE INTERNAL "rpi_pico2_rp2350a_m33_w partition layout alias for rpi_pico2_w")
+set(MCUBOOT_LAYOUT_rpi_pico_rp2040_w "${MCUBOOT_LAYOUT_rpi_pico_w}" CACHE INTERNAL "rpi_pico_rp2040_w partition layout alias for rpi_pico_w")
+set(MCUBOOT_LAYOUT_stm32h750b_dk_stm32h750xx_ext_flash_app "${MCUBOOT_LAYOUT_stm32h750b_dk}" CACHE INTERNAL "stm32h750b_dk_stm32h750xx_ext_flash_app partition layout alias for stm32h750b_dk")
 
 set(MCUBOOT_LAYOUT_BOARDS
     adafruit_clue_nrf52840
@@ -60,6 +79,8 @@ set(MCUBOOT_LAYOUT_BOARDS
     nucleo_u575zi_q
     rpi_pico
     rpi_pico2
+    rpi_pico2_w
+    rpi_pico_w
     siwx917_dk2605a
     stm32h750b_dk
     stm32h7b3i_dk

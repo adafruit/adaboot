@@ -127,8 +127,9 @@ Boards without a `conf/<vendor>/<key>.conf` build the minimal bootloader as befo
 For example, `conf/nordic/nrf54lm20dk.conf` enables UF2 drag-and-drop plus the
 `MCUBOOT_UF2_NO_APPLICATION` fallback, so the bootloader enters UF2 mode
 (presents a USB mass-storage drive) when no bootable application is found
-instead of halting. It also enables double-tap reset entrance and the
-multithreading / retention pieces the USB and double-tap stacks need on Nordic.
+instead of halting. It also enables multithreading / retention pieces the
+USB stack needs on Nordic. (The double-tap entrance needs no explicit opt-in:
+it defaults on for boards with an ``mcuboot-button0`` alias.)
 
 ```
 CONFIG_MULTITHREADING=y
@@ -137,7 +138,6 @@ CONFIG_MCUBOOT_UF2_NO_APPLICATION=y
 CONFIG_RETAINED_MEM=y
 CONFIG_RETENTION=y
 CONFIG_RETENTION_BOOT_MODE=y
-CONFIG_MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP=y
 ```
 
 Only add a board conf fragment for boards that actually have the hardware

@@ -267,7 +267,7 @@ west build -b <your_board> boot/zephyr -- \
 |----------------|-------------|
 | ``MCUBOOT_UF2_ENTRANCE_GPIO`` | Enter the update mode when a GPIO pin is asserted at boot |
 | ``MCUBOOT_UF2_ENTRANCE_BOOT_MODE`` | Enter the update mode via the Zephyr boot mode retention subsystem |
-| ``MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP`` | Enter the update mode on a double tap of the reset button |
+| ``MCUBOOT_UF2_ENTRANCE_DOUBLE_TAP`` | Enter the update mode on a double tap of the reset button; defaults on for boards with an ``mcuboot-button0`` alias, so they always do the boot-time button wait |
 | ``MCUBOOT_UF2_NO_APPLICATION`` | Enter the update mode if no valid application is found |
 
 Multiple entrance methods can be enabled simultaneously. When serial recovery
@@ -283,8 +283,9 @@ window). The window checks the button, the pin-reset cause, the boot-mode
 retention flag (a double reset, or the application's request via
 ``reset_to_bootloader()`` — this enters immediately, with no window latency)
 and the first incoming mcumgr command, then boots the application if none
-fired. Boards without a double-tap or serial wait window keep instant
-entrance checks instead.
+fired. Boards with a button always get the window (the double-tap Kconfigs
+default on when the devicetree has an ``mcuboot-button0`` alias); boards
+without a button keep instant entrance checks instead.
 
 The LED indicator (``CONFIG_MCUBOOT_INDICATION_LED``) mirrors
 Adafruit_nRF52_Bootloader: a fast red-style fade starts at boot and covers

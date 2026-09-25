@@ -18,13 +18,22 @@ include(${ZEPHYR_MCUBOOT_MODULE_DIR}/dts/sysbuild.cmake)
 # Like the dts/ tree, the per-board conf fragments live in vendor
 # subdirectories; board names are unique across vendors, so resolving by
 # filename (globbing one level down) finds the board's fragments.
+#
+# adaboot_layout_key may be the qualified board id (the layout dtsi is
+# registered per variant, e.g. stm32h750b_dk_stm32h750xx_ext_flash_app), but
+# the conf fragments are named per board stem. Fall back to the bare name,
+# like the layout lookup in dts/sysbuild.cmake does, so both spellings find
+# the fragments.
 if(SB_CONFIG_BOOTLOADER_MCUBOOT AND TARGET mcuboot)
+  string(REGEX REPLACE "[@/].*" "" adaboot_conf_key "${BOARD}")
   set(adaboot_conf_dir ${ZEPHYR_MCUBOOT_MODULE_DIR}/conf)
   set(adaboot_confs ${adaboot_conf_dir}/adaboot.conf)
   foreach(suffix .conf -autogen.conf)
-    file(GLOB adaboot_board_confs
-         ${adaboot_conf_dir}/*/${adaboot_layout_key}${suffix})
-    list(APPEND adaboot_confs ${adaboot_board_confs})
+    foreach(key ${adaboot_layout_key} ${adaboot_conf_key})
+      file(GLOB adaboot_board_confs
+           ${adaboot_conf_dir}/*/${key}${suffix})
+      list(APPEND adaboot_confs ${adaboot_board_confs})
+    endforeach()
   endforeach()
 
   get_property(mcuboot_confs CACHE mcuboot_EXTRA_CONF_FILE PROPERTY VALUE)
