@@ -96,6 +96,14 @@ BOARD_AUTOGEN_CONF := $(wildcard $(CONF_VENDOR_DIR)/$(BOARD_KEY)-autogen.conf)
 # updater keeps its data RAM below the bootloader's own (FSBL) RAM region,
 # which the SoC layer's ram_check.ld may assert.
 UPDATER_OVERLAY := $(wildcard $(OVERLAY:.dtsi=-updater.dtsi))
+# Optional bootloader-only overlay (dts/<vendor>/<board>-boot.dtsi), empty if
+# absent. Devicetree content the bootloader needs but the application does not,
+# such as the CDC ACM node serial recovery uses.
+# dts/sysbuild.cmake applies it to the mcuboot image of a sysbuild build.
+BOOT_ONLY_OVERLAY := $(wildcard $(OVERLAY:.dtsi=-boot.dtsi))
+# Overlays for bootloader-image builds (make build, menuconfig): the layout,
+# the bootloader-only overlay if any, then the boot partition selection.
+BOOT_DTC_OVERLAYS := $(OVERLAY);$(if $(BOOT_ONLY_OVERLAY),$(BOOT_ONLY_OVERLAY);)$(BOOT_IMAGE_OVERLAY)
 endif
 
 # Bootloader EXTRA_CONF_FILE:
@@ -199,7 +207,7 @@ build:
 	@echo "==> Building $(BOARD) (Zephyr board $(WEST_BOARD))"
 	$(WEST) build -b $(WEST_BOARD) -d $(BUILD) $(ADABOOT_DIR)/boot/zephyr -- \
 	  -DEXTRA_ZEPHYR_MODULES=$(ADABOOT_DIR) \
-	  -DEXTRA_DTC_OVERLAY_FILE="$(OVERLAY);$(BOOT_IMAGE_OVERLAY)" \
+	  -DEXTRA_DTC_OVERLAY_FILE="$(BOOT_DTC_OVERLAYS)" \
 	  -DEXTRA_CONF_FILE="$(BOOT_CONF_FILE)"
 	@python3 $(ADABOOT_DIR)/tools/boot_partition_bin.py $(BUILD)
 	@-cp $(BUILD)/zephyr/zephyr.hex $(BUILD)/mcuboot.hex 2>/dev/null || true
@@ -273,7 +281,7 @@ menuconfig:
 	@if [ -z "$(WEST_BOARD)" ]; then echo "Unknown board '$(BOARD)'; see 'make list'."; false; fi
 	$(WEST) build -b $(WEST_BOARD) -d $(BUILD) $(ADABOOT_DIR)/boot/zephyr --target menuconfig -- \
 	  -DEXTRA_ZEPHYR_MODULES=$(ADABOOT_DIR) \
-	  -DEXTRA_DTC_OVERLAY_FILE="$(OVERLAY);$(BOOT_IMAGE_OVERLAY)" \
+	  -DEXTRA_DTC_OVERLAY_FILE="$(BOOT_DTC_OVERLAYS)" \
 	  -DEXTRA_CONF_FILE="$(BOOT_CONF_FILE)"
 
 flash:
