@@ -47,9 +47,14 @@ controller (``CONFIG_BOOT_SERIAL_CDC_ACM``), both transports live on one
 composite USB device: the host sees the mass storage drive *and* the serial
 port simultaneously, sharing the UF2 USB identity
 (``CONFIG_MCUBOOT_UF2_USB_VID``/``PID``). A board opts into this by enabling
-both options and adding a ``zephyr,cdc-acm-uart`` node to its USB controller
-(see ``dts/nordic/nrf54lm20dk.dtsi`` and ``conf/nrf54lm20dk.conf`` for an
-example).
+both options and adding a ``zephyr,cdc-acm-uart`` node to its USB controller,
+with ``zephyr,uart-mcumgr`` pointing at it, in a bootloader-only
+``dts/<vendor>/<board>-boot.dtsi``. That file is applied to the bootloader
+image only; in the board's main ``<board>.dtsi``, which is applied to the
+application too, the node would become the application's CDC ACM instance 0
+and renumber the application's own CDC ACM ports. See
+``dts/nordic/nrf54lm20dk-boot.dtsi`` and ``conf/nordic/nrf54lm20dk.conf`` for
+an example.
 
 While the update mode is active, incoming UF2 blocks and incoming serial
 commands are serviced concurrently; whichever transport receives a complete

@@ -1840,13 +1840,15 @@ def discover_layouts():
     <board>.dtsi includes) are skipped: a board's layout is its main dtsi,
     which is what gets applied to an image. Per-board "-updater.dtsi" files
     (updater-only chosen/glue overlays, applied after <board>.dtsi by the
-    Makefile) are skipped too: they are not layouts.
+    Makefile) are skipped too: they are not layouts. So are per-board
+    "-boot.dtsi" files (bootloader-only content, applied after <board>.dtsi to
+    the mcuboot image only by dts/sysbuild.cmake and the Makefile).
     """
     layouts = {}
     dtsis = (
         p
         for p in DTS_OUT_DIR.glob("*/*.dtsi")
-        if not p.stem.endswith("-partitions") and not p.stem.endswith("-updater")
+        if not p.stem.endswith(("-partitions", "-updater", "-boot"))
     )
     for dtsi in sorted(dtsis, key=lambda p: (p.stem, p.parent.name)):
         key = dtsi.stem

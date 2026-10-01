@@ -1,0 +1,28 @@
+/* nRF54LM20 DK bootloader-only devicetree.
+ *
+ * Applied to the mcuboot image only, after nrf54lm20dk.dtsi (by
+ * dts/sysbuild.cmake and the Makefile). Content the bootloader needs but the
+ * application does not: an application that defines its own CDC ACM ports
+ * would otherwise get this node as CDC ACM instance 0 and have its own
+ * ports renumbered.
+ */
+
+/* CDC ACM serial recovery port on the native USB device controller
+ * (zephyr_udc0 = &usbhs, enabled in the upstream board DTS). The
+ * bootloader's combined update mode exposes this serial port and the UF2
+ * mass storage drive simultaneously on one USB device. */
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
+
+/ {
+	chosen {
+		/* Route serial recovery (SMP/mcumgr) to the CDC ACM port on the
+		 * native USB controller instead of the uart20 console, so the
+		 * VCOM UART stays the log console and the bootloader's combined
+		 * update mode serves mcumgr over USB (alongside the UF2 drive). */
+		zephyr,uart-mcumgr = &cdc_acm_uart0;
+	};
+};

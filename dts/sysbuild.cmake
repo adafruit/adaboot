@@ -63,6 +63,15 @@ if(adaboot_layout_key IN_LIST MCUBOOT_BOARDS)
 endif()
 
 if(adaboot_layout)
+  # Optional bootloader-only board content (dts/<vendor>/<board>-boot.dtsi),
+  # applied to the mcuboot image only. This is devicetree content the bootloader
+  # needs but the application does not, such as the CDC ACM node that serial
+  # recovery uses.
+  string(REGEX REPLACE "\\.dtsi$" "-boot.dtsi" adaboot_boot_only_overlay "${adaboot_layout}")
+  if(NOT EXISTS "${adaboot_boot_only_overlay}")
+    set(adaboot_boot_only_overlay "")
+  endif()
+
   set(adaboot_layout_images ${DEFAULT_IMAGE})
   if(TARGET mcuboot)
     # Same file for the bootloader, so the two images cannot disagree about
@@ -102,7 +111,7 @@ if(adaboot_layout)
       # over the image's own auto-detected app.overlay).
       list(APPEND adaboot_overlays ${adaboot_layout})
       if(image STREQUAL "mcuboot")
-        list(APPEND adaboot_overlays ${adaboot_boot_overlay})
+        list(APPEND adaboot_overlays ${adaboot_boot_only_overlay} ${adaboot_boot_overlay})
       elseif(image STREQUAL DEFAULT_IMAGE)
         list(APPEND adaboot_overlays ${adaboot_app_layout_overlays})
       endif()

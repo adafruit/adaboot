@@ -16,6 +16,8 @@
  * includes at the bottom; the glue in this file (delete-node, external flash
  * enablement, boot-mode retention, chosen) is hand-maintained so the overlay
  * is self-contained for both the bootloader and application images.
+ * Bootloader-only content (the serial recovery CDC ACM port) lives in
+ * nrf54lm20dk-boot.dtsi.
  */
 
 /* Delete Zephyr-default (mapped) partitions before redefining as fixed. */
@@ -35,24 +37,9 @@
 	};
 };
 
-/* CDC ACM serial recovery port on the native USB device controller
- * (zephyr_udc0 = &usbhs, enabled in the upstream board DTS). The
- * bootloader's combined update mode exposes this serial port and the UF2
- * mass storage drive simultaneously on one USB device. */
-&zephyr_udc0 {
-	cdc_acm_uart0: cdc_acm_uart0 {
-		compatible = "zephyr,cdc-acm-uart";
-	};
-};
-
 / {
 	chosen {
 		zephyr,boot-mode = &boot_mode0;
-		/* Route serial recovery (SMP/mcumgr) to the CDC ACM port on the
-		 * native USB controller instead of the uart20 console, so the
-		 * VCOM UART stays the log console and the bootloader's combined
-		 * update mode serves mcumgr over USB (alongside the UF2 drive). */
-		zephyr,uart-mcumgr = &cdc_acm_uart0;
 	};
 };
 
