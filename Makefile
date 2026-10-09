@@ -24,11 +24,11 @@ WEST ?= west
 ADABOOT_DIR := $(CURDIR)
 ZEPHYR_CONFIG := $(ADABOOT_DIR)/zephyr-config
 WORKSPACE_MANIFEST := $(ADABOOT_DIR)/zephyr-config/west.yml
-WORKSPACE_MANIFEST_IN := $(ADABOOT_DIR)/zephyr-config/west.yml.in
 CONF_DIR := $(ADABOOT_DIR)/conf
 
-# Known-good Adafruit Zephyr revision (matches CircuitPython's zephyr-cp port).
-ZEPHYR_REV ?= 62e7a3764b652fff733cee43f23f82217403a51d
+# Adafruit Zephyr revision pinned in the committed workspace manifest (matches
+# CircuitPython's zephyr-cp port). Change it there, then run `make update`.
+ZEPHYR_REV := $(shell sed -n 's/^ *revision: *//p' $(WORKSPACE_MANIFEST) | head -1)
 
 # Generated, committed Make fragment: maps each partition key to its canonical
 # Zephyr board id and layout overlay. Regenerate with
@@ -171,13 +171,8 @@ show:
 	@echo "BUILD=$(BUILD)"
 	@echo "UPDATER=$(UPDATER)"
 
-# Generate the workspace manifest from the template (pins the Zephyr revision).
-$(WORKSPACE_MANIFEST): $(WORKSPACE_MANIFEST_IN)
-	@sed -e 's#@ZEPHYR_REV@#$(ZEPHYR_REV)#g' < $< > $@
-	@echo "Generated $(WORKSPACE_MANIFEST) (Zephyr rev $(ZEPHYR_REV))"
-
 # One-time: create the west workspace and fetch Adafruit Zephyr + HALs.
-workspace: $(WORKSPACE_MANIFEST)
+workspace:
 	@if [ ! -d "$(ADABOOT_DIR)/.west" ]; then \
 	  $(WEST) init -l $(ZEPHYR_CONFIG); \
 	else \
@@ -185,8 +180,8 @@ workspace: $(WORKSPACE_MANIFEST)
 	fi
 	$(WEST) update
 
-# Refresh fetched projects (e.g. after bumping ZEPHYR_REV).
-update: $(WORKSPACE_MANIFEST)
+# Refresh fetched projects (e.g. after bumping the revision in zephyr-config/west.yml).
+update:
 	$(WEST) update
 
 # Build the bootloader for one board.
@@ -294,10 +289,10 @@ clean:
 clean-all:
 	@rm -rf $(wildcard build-*)
 
-# Remove the generated manifest and the fetched workspace (deps/ + .west).
-# The committed template (zephyr-config/west.yml.in) and this repo are untouched.
+# Remove the fetched workspace (deps/ + .west). The committed manifest
+# (zephyr-config/west.yml) and this repo are untouched.
 clean-workspace:
-	@rm -rf $(ADABOOT_DIR)/.west $(ADABOOT_DIR)/deps $(WORKSPACE_MANIFEST)
+	@rm -rf $(ADABOOT_DIR)/.west $(ADABOOT_DIR)/deps
 
 # Build every board. Continues on error so one failing board does not stop the
 # rest. To stop on first failure, use: make all STOP_ON_ERROR=1

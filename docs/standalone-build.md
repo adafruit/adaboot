@@ -19,8 +19,8 @@ command from this repo sets up a west workspace (Adafruit Zephyr + HALs under
 separate west manifest of your own, no copying the repo elsewhere.
 
 The setup mirrors CircuitPython's `zephyr-cp` port: a `zephyr-config/west.yml`
-manifest (generated from `zephyr-config/west.yml.in`) imports the Adafruit Zephyr
-fork. Two differences from a plain Zephyr import:
+manifest imports the Adafruit Zephyr fork, pinned to a specific revision. Two
+differences from a plain Zephyr import:
 
 - Zephyr is imported with `path-prefix: deps` so its projects land under `deps/`
   and never collide with this repo's own `zephyr/` (the Zephyr *module* metadata)
@@ -46,16 +46,12 @@ fork. Two differences from a plain Zephyr import:
 make workspace
 ```
 
-This generates `zephyr-config/west.yml` from the template (pinning the Adafruit
-Zephyr revision), runs `west init -l zephyr-config`, and `west update` -- cloning
-Adafruit Zephyr and the HALs into `deps/`. It is slow the first time; subsequent
+This runs `west init -l zephyr-config` and `west update` -- cloning Adafruit
+Zephyr and the HALs into `deps/`. It is slow the first time; subsequent
 builds are offline.
 
-To use a different Adafruit Zephyr revision:
-
-```
-make workspace ZEPHYR_REV=<sha>
-```
+To use a different Adafruit Zephyr revision, change `revision:` for `zephyr` in
+`zephyr-config/west.yml`, then run `make update`.
 
 ## Build one board
 
@@ -184,7 +180,7 @@ make flash BOARD=nordic_nrf54l15dk
 make clean BOARD=nordic_nrf54l15dk      # remove one build dir
 make clean-all                   # remove every build-* dir
 make clean-workspace              # remove deps/ and .west (keeps the repo)
-make update                      # re-run west update (e.g. after bumping ZEPHYR_REV)
+make update                      # re-run west update (e.g. after bumping the Zephyr revision)
 ```
 
 ## Notes
@@ -196,5 +192,4 @@ make update                      # re-run west update (e.g. after bumping ZEPHYR
   themselves stay hardware-agnostic.
 - The partition layout comes from this fork's `dts/`; if you edit a dtsi you see
   the change immediately (the overlay is read from this tree, not from `deps/`).
-- Everything under `deps/`, `.west/`, `build-*/`, and the generated
-  `zephyr-config/west.yml` is git-ignored.
+- Everything under `deps/`, `.west/`, and `build-*/` is git-ignored.
