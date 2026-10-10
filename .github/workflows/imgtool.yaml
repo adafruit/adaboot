@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
+        # ADABOOT-CHANGE: Python 3.12+ only. PyPy dropped: PyPy 8.0.0 breaks the
+        # tests with BufferError (https://github.com/pypy/pypy/issues/5612).
         python-version: ["3.12", "3.13", "3.14"]
     steps:
     - uses: actions/checkout@v6
