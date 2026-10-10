@@ -3,41 +3,38 @@
 
 """Tests for tools/partition_layout.py partition planning and rendering."""
 
-import sys
 import pathlib
+import sys
 from types import SimpleNamespace
-
-import pytest
 
 # Add the tools dir to path so we can import partition_layout.
 TOOLS_DIR = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(TOOLS_DIR))
 
-from partition_layout import (
+from partition_layout import (  # noqa: E402 (needs the sys.path entry above)
+    DTS_OUT_DIR,
     KB,
     MB,
-    align_up,
-    align_down,
-    format_size,
-    format_dt_size,
-    make_partitions_with_gaps,
-    render_bar,
-    render_detail_lines,
-    generate_partitions_dtsi,
-    generate_mapped_split_dtsi,
-    mapped_partition_devices,
-    plan_partitions,
-    plan_code_partition_split,
+    ZEPHYR_BASE,
     _has_predefined_mcuboot,
+    align_down,
+    align_up,
     discover_all_flash,
+    filesystem_node_label,
+    format_dt_size,
+    format_size,
+    generate_mapped_split_dtsi,
+    generate_partitions_dtsi,
     get_erase_size,
     get_total_size,
     has_native_usb,
-    filesystem_node_label,
-    DTS_OUT_DIR,
-    ZEPHYR_BASE,
+    make_partitions_with_gaps,
+    mapped_partition_devices,
+    plan_code_partition_split,
+    plan_partitions,
+    render_bar,
+    render_detail_lines,
 )
-
 
 # ── Helpers to build fake EDT nodes ──────────────────────────────────────
 
@@ -258,7 +255,7 @@ class TestRenderDetailLines:
         erase = 4096
         parts = [("mcuboot", "boot_partition", 100, 5000)]  # misaligned offset and size
         lines = render_detail_lines(parts, 1 * MB, erase)
-        mcuboot_line = [l for l in lines if "mcuboot" in l][0]
+        mcuboot_line = [line for line in lines if "mcuboot" in line][0]
         assert "!offset" in mcuboot_line
         assert "!size" in mcuboot_line
 
@@ -277,7 +274,7 @@ class TestRenderDetailLines:
         ]
         lines = render_detail_lines(parts, 1 * MB, erase)
         # The 512-byte gap should be hidden (< 1024)
-        labels = [l.strip().split()[-1] for l in lines]
+        labels = [line.strip().split()[-1] for line in lines]
         assert "free" not in labels
 
 
@@ -511,7 +508,7 @@ class TestPlanPartitions:
         edt = _make_edt(_internal_flash())
         result = plan_partitions(edt)
         _, _, erase_size, parts, _ = result[0]
-        for label, node_label, offset, size in parts:
+        for label, _node_label, offset, size in parts:
             assert offset % erase_size == 0, f"{label} offset 0x{offset:x} not aligned"
             assert size % erase_size == 0, f"{label} size 0x{size:x} not aligned"
 
@@ -523,7 +520,8 @@ class TestPlanPartitions:
             end_i = parts[i][2] + parts[i][3]
             start_next = parts[i + 1][2]
             assert end_i <= start_next, (
-                f"{parts[i][0]} ends at 0x{end_i:x} but {parts[i + 1][0]} starts at 0x{start_next:x}"
+                f"{parts[i][0]} ends at 0x{end_i:x}"
+                f" but {parts[i + 1][0]} starts at 0x{start_next:x}"
             )
         # Last partition should not exceed flash
         last_end = parts[-1][2] + parts[-1][3]
@@ -555,8 +553,8 @@ class TestPlanPartitions:
             _external_flash(erase=65536),
         )
         result = plan_partitions(edt)
-        for dev_label, total_size, erase_size, parts, _ in result:
-            for label, node_label, offset, size in parts:
+        for dev_label, _total_size, erase_size, parts, _ in result:
+            for label, _node_label, offset, size in parts:
                 assert offset % erase_size == 0, (
                     f"{dev_label}/{label} offset 0x{offset:x} not aligned to {erase_size}"
                 )
@@ -604,8 +602,8 @@ class TestPlanPartitions:
         assert ext_parts["image-1"][3] == 61 * 32 * KB
 
         # All partitions on each device must be aligned to that device's erase
-        for dev_label, total_size, erase_size, parts, _ in result:
-            for label, node_label, offset, size in parts:
+        for dev_label, _total_size, erase_size, parts, _ in result:
+            for label, _node_label, offset, size in parts:
                 assert offset % erase_size == 0, (
                     f"{dev_label}/{label} offset 0x{offset:x} not aligned to {erase_size}"
                 )
@@ -625,7 +623,7 @@ class TestPlanPartitions:
         edt = _make_edt(_external_flash(size=16 * MB, erase=65536))
         result = plan_partitions(edt)
         _, _, erase_size, parts, _ = result[0]
-        for label, node_label, offset, size in parts:
+        for label, _node_label, offset, size in parts:
             assert offset % erase_size == 0, f"{label} offset not aligned"
             assert size % erase_size == 0, f"{label} size not aligned"
 
@@ -1085,7 +1083,7 @@ class TestPredefinedMcuboot:
         edt = _make_edt(flash)
         result = plan_partitions(edt)
         _, _, erase_size, parts, predefined = result[0]
-        for label, node_label, offset, size in parts:
+        for label, _node_label, offset, size in parts:
             if label not in predefined:
                 assert offset % erase_size == 0, f"{label} offset not aligned"
                 assert size % erase_size == 0, f"{label} size not aligned"

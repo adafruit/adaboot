@@ -260,7 +260,7 @@ def get_erase_size(node):
     if "pages_layout" in node.children:
         erase_size = 0
         pl = node.children["pages_layout"]
-        for layout_name, layout_node in pl.children.items():
+        for _layout_name, layout_node in pl.children.items():
             ps = layout_node.props.get("pages-size")
             if ps and ps.val > erase_size:
                 erase_size = ps.val
@@ -353,7 +353,8 @@ def extract_flash_devices(edt, flash_overrides=None):
         # and the newer bare `partitions { ranges; }` style (Nordic, NXP)
         # whose children are zephyr,mapped-partition nodes.
         has_reg_children = any("reg" in p.props for p in partitions_node.children.values())
-        if "fixed-partitions" not in getattr(partitions_node, "compats", []) and not has_reg_children:
+        compats = getattr(partitions_node, "compats", [])
+        if "fixed-partitions" not in compats and not has_reg_children:
             continue
         dev_label = node.labels[0] if node.labels else node.name
         parts = []
@@ -589,7 +590,7 @@ def make_partitions_with_gaps(parts, total_size):
     parts = sorted(parts, key=lambda p: p[2])  # sort by offset
     result = []
     cursor = 0
-    for label, node_label, offset, size in parts:
+    for label, _node_label, offset, size in parts:
         if offset > cursor:
             result.append(("free", cursor, offset - cursor))
         result.append((label, offset, size))
@@ -610,7 +611,7 @@ def format_size(size_bytes):
 def render_bar(parts, total_size):
     full = make_partitions_with_gaps(parts, total_size)
     bar = []
-    for label, offset, size in full:
+    for label, _offset, size in full:
         char = FILL.get(label, ("?", ""))[0]
         cols = max(1, round(size / total_size * BAR_WIDTH))
         bar.append(char * cols)
@@ -634,14 +635,15 @@ def render_detail_lines(parts, total_size, erase_size):
         if size % erase_size != 0:
             warn += " !size"
         lines.append(
-            f"    [{char}] 0x{offset:08X}..0x{end:08X}  {format_size(size):>10s}  {pages_str:>8s}  {label}{warn}"
+            f"    [{char}] 0x{offset:08X}..0x{end:08X}  {format_size(size):>10s}"
+            f"  {pages_str:>8s}  {label}{warn}"
         )
     return lines
 
 
 def show_layout(devices):
     print("  Legend:")
-    for key, (char, desc) in FILL.items():
+    for _key, (char, desc) in FILL.items():
         print(f"    {char}  {desc}")
     print()
 
@@ -682,7 +684,7 @@ def _has_predefined_mcuboot(edt, flash_overrides=None):
     Returns the existing partitions by device label if mcuboot is found, else None.
     """
     existing = extract_flash_devices(edt, flash_overrides)
-    for dev_label, total_size, erase_size, parts, internal in existing:
+    for _dev_label, _total_size, _erase_size, parts, _internal in existing:
         labels = {p[0] for p in parts}
         if "mcuboot" in labels and "image-0" in labels:
             return existing
@@ -732,14 +734,14 @@ def plan_partitions_predefined(
     deleted_devices = deleted_devices or set()
     devices = extract_flash_devices(edt, flash_overrides)
     all_flash = discover_all_flash(edt, flash_overrides)
-    data_flash = [(l, s, e) for l, s, e, i in all_flash if i and s < 64 * KB]
-    external = [(l, s, e) for l, s, e, i in all_flash if not i and s >= 1 * MB]
+    data_flash = [(label, s, e) for label, s, e, i in all_flash if i and s < 64 * KB]
+    external = [(label, s, e) for label, s, e, i in all_flash if not i and s >= 1 * MB]
     secondary_slot = not single_app and (_swap_supported(edt) or overwrite_only)
     fs_node_label = filesystem_node_label(edt)
 
     result = []
     planned_labels = set()
-    for dev_label, total_size, erase_size, parts, internal in devices:
+    for dev_label, total_size, erase_size, parts, _internal in devices:
         # The internal flash's plan may have moved slot1 + filesystem onto
         # this device already; skip its own pass-through so the plan does not
         # carry duplicate entries.
@@ -771,7 +773,7 @@ def plan_partitions_predefined(
         # from the external flash itself, so it is not spare -- their
         # upstream layout is kept in place instead.
         grow_ext = (
-            [(l, s, e) for l, s, e in external if l != dev_label]
+            [(label, s, e) for label, s, e in external if label != dev_label]
             if secondary_slot
             else []
         )
@@ -1299,7 +1301,7 @@ def plan_code_partition_split(edt, flash_overrides=None, slot_size_kb=None,
     boot_size = align_up(128 * KB, erase)
     slot0_offset = base + boot_size
     slot0_labels = ["slot0_partition"] + [
-        l for l in upstream_labels if l != "slot0_partition"
+        label for label in upstream_labels if label != "slot0_partition"
     ]
 
     # Upstream partitions on the same device that follow the region's base
@@ -1380,7 +1382,7 @@ def plan_code_partition_split(edt, flash_overrides=None, slot_size_kb=None,
     # upstream node is ``code_partition`` there, while a --fix re-run finds
     # the label on the generated slot0 (whose own labels don't exist in a
     # fresh build).
-    delete_labels = sorted(upstream_labels, key=lambda l: l != "code_partition")
+    delete_labels = sorted(upstream_labels, key=lambda label: label != "code_partition")
     return {
         "dev_label": dev_label,
         "erase": erase,
@@ -1414,7 +1416,7 @@ def generate_mapped_split_dtsi(plan):
     lines.append(f"\t\t\treg = <0x{boot_off:x} {format_dt_size(boot_size)}>;")
     lines.append("\t\t};")
     lines.append("")
-    label_decls = " ".join(f"{l}:" for l in slot0_labels)
+    label_decls = " ".join(f"{label}:" for label in slot0_labels)
     lines.append(f"\t\t{label_decls} partition@{slot0_off:x} {{")
     lines.append('\t\t\tcompatible = "zephyr,mapped-partition";')
     lines.append(f'\t\t\tlabel = "{slot0_label}";')
@@ -1528,10 +1530,10 @@ def plan_partitions(
 
     # Separate small internal data flash (< 64 KB) from main internal flash.
     # Data flash (e.g. RA6/RA8 flash1) has small erase pages ideal for NVM.
-    data_flash = [(l, s, e) for l, s, e, i in all_flash if i and s < 64 * KB]
-    internal = [(l, s, e) for l, s, e, i in all_flash if i and s >= 64 * KB]
+    data_flash = [(label, s, e) for label, s, e, i in all_flash if i and s < 64 * KB]
+    internal = [(label, s, e) for label, s, e, i in all_flash if i and s >= 64 * KB]
     # Filter out tiny external flash regions
-    external = [(l, s, e) for l, s, e, i in all_flash if not i and s >= 1 * MB]
+    external = [(label, s, e) for label, s, e, i in all_flash if not i and s >= 1 * MB]
     secondary_slot = not single_app and (_swap_supported(edt) or overwrite_only)
 
     MCUBOOT_SIZE = 128 * KB
@@ -1770,14 +1772,14 @@ def generate_partitions_dtsi(planned_devices, mapped_devices=None):
     """
     lines = []
 
-    for dev_label, total_size, erase_size, parts, *rest in planned_devices:
+    for dev_label, _total_size, _erase_size, parts, *rest in planned_devices:
         predefined = rest[0] if rest else set()
-        new_parts = [(l, nl, o, s) for l, nl, o, s in parts if l not in predefined]
+        new_parts = [(label, nl, o, s) for label, nl, o, s in parts if label not in predefined]
         # Upstream-defined partitions this file keeps as-is: they have known
         # geometry in the plan (so they can be listed) even though they are
         # not re-emitted.
         inherited = sorted(
-            ((l, nl, o, s) for l, nl, o, s in parts if l in predefined),
+            ((label, nl, o, s) for label, nl, o, s in parts if label in predefined),
             key=lambda p: p[2],
         )
         if not new_parts and not inherited:
@@ -1937,7 +1939,10 @@ def gen_mcuboot_boards_cmake():
     lines.append("")
     lines.append("set(MCUBOOT_BOARDS")
     lines.extend(f"    {k}" for k in mcuboot_keys)
-    lines.append('    CACHE INTERNAL "Boards that boot via mcuboot (per this fork\'s boards.toml; mcuboot = true)"')
+    lines.append(
+        '    CACHE INTERNAL "Boards that boot via mcuboot'
+        ' (per this fork\'s boards.toml; mcuboot = true)"'
+    )
     lines.append(")")
 
     MCUBOOT_BOARDS_CMAKE.parent.mkdir(parents=True, exist_ok=True)
@@ -2434,7 +2439,10 @@ def fix_alignment(
     is only created when it does not exist; it is never rewritten.
     """
     if not vendor:
-        print(f"  No vendor declared for {board_key} in boards.toml; cannot place dtsi.", file=sys.stderr)
+        print(
+            f"  No vendor declared for {board_key} in boards.toml; cannot place dtsi.",
+            file=sys.stderr,
+        )
         return
     dtsi_dir = DTS_OUT_DIR / vendor
     partitions_path = dtsi_dir / f"{board_key}-partitions.dtsi"
@@ -2471,13 +2479,15 @@ def fix_alignment(
                 f"    {nvm_label}: 0x{nvm_off:x} + {format_dt_size(nvm_size)}"
                 f" ({format_size(nvm_size)})"
             )
-        for label, node_label, off, size in split.get("preserved", []):
+        for label, _node_label, off, size in split.get("preserved", []):
             print(
                 f"    {label}: 0x{off:x} + {format_dt_size(size)}"
                 f" ({format_size(size)}) [upstream, kept]"
             )
         print()
-        content = partitions_dtsi_header(board_key, vendor) + "\n" + generate_mapped_split_dtsi(split)
+        content = (
+            partitions_dtsi_header(board_key, vendor) + "\n" + generate_mapped_split_dtsi(split)
+        )
         dtsi_dir.mkdir(parents=True, exist_ok=True)
         partitions_path.write_text(content)
         print(f"  Wrote {partitions_path.relative_to(MODULE_DIR.parent)}")
@@ -2506,9 +2516,9 @@ def fix_alignment(
     for dev_label, total_size, erase_size, parts, *rest in planned:
         predefined = rest[0] if rest else set()
         kind_parts = [
-            (l, s, e, i)
-            for l, s, e, i in discover_all_flash(edt, flash_overrides)
-            if l == dev_label
+            (label, s, e, i)
+            for label, s, e, i in discover_all_flash(edt, flash_overrides)
+            if label == dev_label
         ]
         kind = "internal" if kind_parts and kind_parts[0][3] else "external"
         print(
@@ -2642,7 +2652,10 @@ def main():
             region_size = split["region_size"]
             boot_label, _, boot_off, boot_size = split["boot"]
             slot0_label, _, slot0_off, slot0_size = split["slot0"]
-            print(f"  {dev_label} ({format_size(region_size)} code region, shared-flash split)  erase page: {format_size(erase)}")
+            print(
+                f"  {dev_label} ({format_size(region_size)} code region, shared-flash split)"
+                f"  erase page: {format_size(erase)}"
+            )
             print(f"    {boot_label}: 0x{boot_off:x} + {format_size(boot_size)}")
             print(f"    {slot0_label}: 0x{slot0_off:x} + {format_size(slot0_size)}")
             if split["filesystem"] is not None:

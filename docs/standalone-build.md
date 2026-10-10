@@ -38,7 +38,7 @@ differences from a plain Zephyr import:
 - A Zephyr toolchain. The Zephyr SDK is the easiest; see the Zephyr getting
   started guide. The build picks the toolchain the way any Zephyr build does
   (`ZEPHYR_SDK_INSTALL_DIR`, `ZEPHYR_TOOLCHAIN_VARIANT`, etc.).
-- `python3 >= 3.11` (the helper uses `tomllib`).
+- `python3 >= 3.12`.
 
 ## One-time setup
 
