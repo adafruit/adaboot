@@ -1901,6 +1901,9 @@ def gen_mcuboot_boards_cmake():
         if "/" not in entry["board"]:
             continue
         alias = entry["board"].replace("/", "_").replace("@", "_")
+        # A key that already is the full id needs no alias.
+        if alias == key:
+            continue
         variant_aliases[alias] = key
 
     lines = [
