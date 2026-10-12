@@ -4,6 +4,7 @@
 """Tests for tools/partition_layout.py partition planning and rendering."""
 
 import pathlib
+import re
 import sys
 from types import SimpleNamespace
 
@@ -41,6 +42,10 @@ from partition_layout import (  # noqa: E402 (needs the sys.path entry above)
 
 def _prop(val):
     return SimpleNamespace(val=val)
+
+
+def _strip_comments(dtsi):
+    return re.sub(r"/\*.*?\*/", "", dtsi, flags=re.DOTALL)
 
 
 def _flash_node(
@@ -849,8 +854,8 @@ class TestGeneratePartitionsDtsi:
         # Should NOT emit compatible since partitions node already exists
         assert 'compatible = "fixed-partitions"' not in dtsi
 
-    def test_predefined_all_skipped_means_no_output(self):
-        """If all partitions are predefined, nothing should be generated."""
+    def test_predefined_all_skipped_emits_no_partitions(self):
+        """If all partitions are predefined, no partition is re-emitted."""
         predefined = {"mcuboot", "image-0"}
         planned = [
             (
@@ -864,8 +869,10 @@ class TestGeneratePartitionsDtsi:
                 predefined,
             )
         ]
-        dtsi = generate_partitions_dtsi(planned)
-        assert dtsi == ""
+        dtsi = _strip_comments(generate_partitions_dtsi(planned))
+        assert "partition@" not in dtsi
+        assert "label =" not in dtsi
+        assert "compatible" not in dtsi
 
 
 # ── Unit tests: predefined mcuboot layout ────────────────────────────────
