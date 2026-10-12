@@ -280,6 +280,15 @@ board = "adafruit_feather_nrf52840/nrf52840/uf2"
 vendor = "adafruit"
 mcuboot = false
 
+[boards.adafruit_itsybitsy_nrf52840]
+# UF2 board, same layout as the Feather nRF52840: the layout owns the app-side
+# partitions (code/storage/nvm on internal flash, the whole 2 MB GD25Q16 QSPI
+# NOR as the user filesystem) and leaves the SoftDevice/UF2 regions to the
+# upstream board dtsi (see dts/adafruit/adafruit_itsybitsy_nrf52840.dtsi).
+board = "adafruit_itsybitsy/nrf52840"
+vendor = "adafruit"
+mcuboot = false
+
 [boards.native_sim]
 # Host simulation (native_sim/native): no real flash, the layout just shapes
 # upstream's simulated flash for the port (see dts/native/native_sim.dtsi).

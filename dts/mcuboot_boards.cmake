@@ -15,6 +15,7 @@
 set(MCUBOOT_LAYOUT_adafruit_clue_nrf52840 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_clue_nrf52840.dtsi" CACHE INTERNAL "adafruit_clue_nrf52840 partition layout")
 set(MCUBOOT_LAYOUT_adafruit_feather_nrf52840 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_feather_nrf52840.dtsi" CACHE INTERNAL "adafruit_feather_nrf52840 partition layout")
 set(MCUBOOT_LAYOUT_adafruit_feather_rp2040 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_feather_rp2040.dtsi" CACHE INTERNAL "adafruit_feather_rp2040 partition layout")
+set(MCUBOOT_LAYOUT_adafruit_itsybitsy_nrf52840 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_itsybitsy_nrf52840.dtsi" CACHE INTERNAL "adafruit_itsybitsy_nrf52840 partition layout")
 set(MCUBOOT_LAYOUT_da14695_dk_usb "${CMAKE_CURRENT_LIST_DIR}/renesas/da14695_dk_usb.dtsi" CACHE INTERNAL "da14695_dk_usb partition layout")
 set(MCUBOOT_LAYOUT_ek_ra6m5 "${CMAKE_CURRENT_LIST_DIR}/renesas/ek_ra6m5.dtsi" CACHE INTERNAL "ek_ra6m5 partition layout")
 set(MCUBOOT_LAYOUT_ek_ra8d1 "${CMAKE_CURRENT_LIST_DIR}/renesas/ek_ra8d1.dtsi" CACHE INTERNAL "ek_ra8d1 partition layout")
@@ -61,6 +62,7 @@ set(MCUBOOT_LAYOUT_BOARDS
     adafruit_clue_nrf52840
     adafruit_feather_nrf52840
     adafruit_feather_rp2040
+    adafruit_itsybitsy_nrf52840
     da14695_dk_usb
     ek_ra6m5
     ek_ra8d1
