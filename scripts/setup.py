@@ -12,7 +12,8 @@ setuptools.setup(
     license="Apache Software License",
     url="http://github.com/mcu-tools/mcuboot",
     packages=setuptools.find_packages(),
-    python_requires='>=3.8',
+    # ADABOOT-CHANGE: Python 3.12+ (was 3.8+).
+    python_requires='>=3.12',
     install_requires=[
         'cryptography>=40.0.0',
         'intelhex>=2.2.1',

@@ -204,7 +204,7 @@ def cmd_slot1(updater_dir, boot_dir=None):
         # overwrite-only trailer. (Keeps boards whose write block exceeds
         # imgtool's 32-byte --align cap, like the RA8's 128, working.)
         cmd.append("--overwrite-only")
-        print(f"==> Signing slot1 updater variant (overwrite-only, no align) ...")
+        print("==> Signing slot1 updater variant (overwrite-only, no align) ...")
     else:
         cmd += ["--align", str(wbs)]
         print(f"==> Signing slot1 updater variant (swap, align {wbs}) ...")

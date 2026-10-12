@@ -15,19 +15,16 @@
 from __future__ import annotations
 
 import subprocess
-import sys
-from typing import TYPE_CHECKING
+
+# ADABOOT-CHANGE: Python 3.12+ only, so import assert_type directly (no sys
+# version check or typing_extensions fallback).
+from typing import TYPE_CHECKING, assert_type
 
 import pytest
 from click.testing import CliRunner
 from imgtool import keys
 from imgtool import main as imgtool_main
 from imgtool.main import imgtool
-
-if sys.version_info >= (3, 11):
-    from typing import assert_type
-else:
-    from typing_extensions import assert_type
 
 if TYPE_CHECKING:
     from pathlib import Path

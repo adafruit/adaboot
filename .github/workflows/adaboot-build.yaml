@@ -82,9 +82,6 @@ jobs:
           show-progress: false
           fetch-depth: 1
 
-      - name: Generate west manifest
-        run: make zephyr-config/west.yml
-
       - name: Set up Zephyr
         uses: zephyrproject-rtos/action-zephyr-setup@v1
         with:
