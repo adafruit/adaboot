@@ -1,0 +1,59 @@
+/* ItsyBitsy nRF52840 UF2 layout (no mcuboot): applied to the application image
+ * only.
+ *
+ * The ItsyBitsy boots from the Adafruit nRF52 bootloader (UF2) on top of the
+ * SoftDevice, so there is no mcuboot domain. The fork still owns this layout
+ * so CircuitPython, Arduino, and Wippersnapper share the same code/nvm/storage
+ * placement. Flash is 1 MB on the nRF52840.
+ *
+ * The SoftDevice reservation and the UF2 bootloader region come from the
+ * upstream board dtsi and are not redefined here. Only the upstream
+ * partitions this layout replaces are deleted.
+ *
+ * The internal flash hosts only app-side partitions (code/storage/nvm); the
+ * ItsyBitsy's entire 2 MB GD25Q16 QSPI NOR is the user filesystem (the board
+ * has native USB, so the node label is fatfs_partition).
+ *
+ * The layout is the same as the Feather nRF52840 Express: nvm_partition is
+ * 8 KB at 0xf2000, matching the nordic port's CIRCUITPY_INTERNAL_NVM_SIZE
+ * default.
+ */
+&gd25q16 {
+	/delete-node/ partitions;
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		fatfs_partition: partition@0 {
+			label = "filesystem";
+			reg = <0x0 DT_SIZE_M(2)>;
+		};
+	};
+};
+
+/delete-node/ &code_partition;
+/delete-node/ &storage_partition;
+
+&flash0 {
+	partitions {
+		code_partition: partition@26000 {
+			compatible = "zephyr,mapped-partition";
+			label = "code-partition";
+			reg = <0x00026000 0x000c4000>;
+		};
+
+		storage_partition: partition@ea000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x000ea000 0x00008000>;
+		};
+
+		nvm_partition: partition@f2000 {
+			compatible = "zephyr,mapped-partition";
+			label = "nvm";
+			reg = <0x000f2000 0x00002000>;
+		};
+	};
+};
