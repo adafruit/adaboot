@@ -18,11 +18,11 @@
  *   -> RETENTION_BOOT_MODE) enabled for the flag to exist.
  * - RP2 boards (no MCUboot) use the same bootmode_set() write. Zephyr's
  *   rom_bootloader.c reads the flag early on the next boot and calls the ROM
- *   reset_usb_boot(), which enters the RP2 ROM UF2 bootloader. The fork's RP2
- *   layout dtsis wire up the retention region and zephyr/Kconfig enables the
- *   chain, so applications need no setup of their own. The region carries a
- *   prefix and CRC8 so leftover SRAM after a cold boot is not read as a
- *   request.
+ *   reset_usb_boot(), which enters the RP2 ROM UF2 bootloader. The fork's
+ *   dts/sysbuild.cmake adds the retention region to every RP2040 and RP2350
+ *   application image and zephyr/Kconfig enables the chain, so applications
+ *   need no setup of their own. The region carries a prefix and CRC8 so
+ *   leftover SRAM after a cold boot is not read as a request.
  * - Boards running the stock Adafruit nRF52 bootloader read the raw GPREGRET
  *   register after any reset, so the request is a GPREGRET magic value.
  * - Boards with neither backend (no boot-mode retention region and no

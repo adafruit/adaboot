@@ -79,11 +79,17 @@ effect). The bootloader image must not link there, so `dts/sysbuild.cmake`
 `dts/boot-partition.overlay` *after* the layout, re-pointing the property at
 `boot_partition` for the mcuboot image.
 
+RP2040 and RP2350 boards also get `dts/rp2040-boot-mode.overlay` or
+`dts/rp2350-boot-mode.overlay` on the application image, chosen from the SoC
+qualifier rather than the board. That is the boot-mode retention region
+`adaboot_request_update_mode()` uses to reach the ROM UF2 bootloader (see
+`boot/zephyr/include/adaboot/update_mode.h`).
+
 The pieces, all reached through `zephyr/module.yml`:
 
 | file                       | role                                                              |
 |----------------------------|-------------------------------------------------------------------|
-| `dts/sysbuild.cmake`       | applies `MCUBOOT_LAYOUT_<board>` to the app and mcuboot images     |
+| `dts/sysbuild.cmake`       | applies `MCUBOOT_LAYOUT_<board>` to the app and mcuboot images, and the RP2 boot-mode overlay to the app |
 | `dts/Kconfig.sysbuild`     | generated `SB_CONFIG_BOOTLOADER_*` defaults per board              |
 | `dts/mcuboot_boards.cmake` | generated index the two above (and other tooling) read             |
 

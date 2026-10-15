@@ -1,0 +1,19 @@
+/* RP2040 boot-mode retention for adaboot_request_update_mode().
+ *
+ * RP2 boards have no mcuboot, so the request is a flag in retained SRAM that
+ * Zephyr's soc/raspberrypi/rpi_pico/common/rom_bootloader.c reads early on
+ * the next boot before calling the ROM reset_usb_boot(). The region is a
+ * property of the SoC, not the board, so dts/sysbuild.cmake applies this
+ * overlay to the application image of every RP2040 board instead of each
+ * layout repeating it.
+ *
+ * Zephyr's region is a single unguarded byte. The "AB" prefix and CRC8 here
+ * keep leftover SRAM after a cold boot from being read as a request.
+ */
+#include <vendor/raspberrypi/rp2040-boot-mode-retention.dtsi>
+
+&boot_mode {
+	reg = <0x0 0x4>;
+	prefix = [41 42];
+	checksum = <1>;
+};
