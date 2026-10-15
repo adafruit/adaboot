@@ -1,0 +1,21 @@
+# Copyright (c) 2026 Adafruit Industries
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# RP2 boot-mode retention for adaboot_request_update_mode(); see
+# boot/zephyr/include/adaboot/update_mode.h.
+
+DT_BOOT_MODE_CHOSEN := zephyr,boot-mode
+
+if SOC_FAMILY_RPI_PICO && $(dt_chosen_enabled,$(DT_BOOT_MODE_CHOSEN))
+
+configdefault RETAINED_MEM
+	default y
+
+configdefault RETENTION
+	default y
+
+configdefault RETENTION_BOOT_MODE
+	default y
+
+endif
