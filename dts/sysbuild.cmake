@@ -125,3 +125,36 @@ if(adaboot_layout)
     endif()
   endforeach()
 endif()
+
+# RP2 boot-mode retention (dts/rp2040-boot-mode.overlay,
+# dts/rp2350-boot-mode.overlay). It belongs to the SoC rather than the board,
+# so it is chosen from the SoC qualifier and applied to the application image
+# of every RP2040 and RP2350 board, whether or not it has a layout here.
+set(adaboot_boot_mode_overlay "")
+if("${BOARD_QUALIFIERS}" MATCHES "(^|/)rp2040(/|$)")
+  set(adaboot_boot_mode_overlay ${CMAKE_CURRENT_LIST_DIR}/rp2040-boot-mode.overlay)
+elseif("${BOARD_QUALIFIERS}" MATCHES "(^|/)rp2350[ab]?(/|$)")
+  set(adaboot_boot_mode_overlay ${CMAKE_CURRENT_LIST_DIR}/rp2350-boot-mode.overlay)
+endif()
+
+if(adaboot_boot_mode_overlay)
+  # Same choice as for the layout above: prepend when the application set
+  # DTC_OVERLAY_FILE itself, otherwise append as an EXTRA overlay so Zephyr's
+  # app.overlay lookup still runs.
+  get_property(image_dtc_overlay CACHE ${DEFAULT_IMAGE}_DTC_OVERLAY_FILE PROPERTY VALUE)
+  if(image_dtc_overlay)
+    if(NOT "${adaboot_boot_mode_overlay}" IN_LIST image_dtc_overlay)
+      set(${DEFAULT_IMAGE}_DTC_OVERLAY_FILE "${adaboot_boot_mode_overlay};${image_dtc_overlay}"
+          CACHE INTERNAL "RP2 boot-mode retention prepended to ${DEFAULT_IMAGE} devicetree overlays" FORCE
+      )
+    endif()
+  else()
+    set(adaboot_overlays ${${DEFAULT_IMAGE}_EXTRA_DTC_OVERLAY_FILE})
+    if(NOT "${adaboot_boot_mode_overlay}" IN_LIST adaboot_overlays)
+      list(APPEND adaboot_overlays ${adaboot_boot_mode_overlay})
+      set(${DEFAULT_IMAGE}_EXTRA_DTC_OVERLAY_FILE "${adaboot_overlays}"
+          CACHE INTERNAL "RP2 boot-mode retention overlay for ${DEFAULT_IMAGE}" FORCE
+      )
+    endif()
+  endif()
+endif()

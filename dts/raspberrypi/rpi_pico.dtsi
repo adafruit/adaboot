@@ -51,12 +51,3 @@
 		};
 	};
 };
-
-/* Boot-mode retention for adaboot_request_update_mode(), "AB" prefix + CRC8. */
-#include <vendor/raspberrypi/rp2040-boot-mode-retention.dtsi>
-
-&boot_mode {
-	reg = <0x0 0x4>;
-	prefix = [41 42];
-	checksum = <1>;
-};
