@@ -226,6 +226,11 @@ board = "adafruit_feather_rp2040"
 vendor = "adafruit"
 mcuboot = false
 
+[boards.adafruit_macropad_rp2040]
+board = "adafruit_macropad_rp2040"
+vendor = "adafruit"
+mcuboot = false
+
 [boards.rpi_pico]
 board = "rpi_pico"
 vendor = "raspberrypi"
