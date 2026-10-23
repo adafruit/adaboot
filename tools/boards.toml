@@ -265,6 +265,16 @@ mcuboot = false
 board = "stm32h750b_dk/stm32h750xx/ext_flash_app"
 vendor = "st"
 
+[boards.adafruit_circuitplayground_bluefruit]
+# UF2 variant: the CPB boots from the Adafruit nRF52 bootloader on top of
+# the SoftDevice. The layout owns the app-side partitions (code/storage/nvm
+# on internal flash, the whole 2 MB QSPI flash as the user filesystem)
+# and leaves the variant-dependent SoftDevice/UF2 regions to the upstream
+# board dtsi (see dts/adafruit/adafruit_circuitplayground_bluefruit.dtsi).
+board = "adafruit_circuitplayground_bluefruit/nrf52840/uf2"
+vendor = "adafruit"
+mcuboot = false
+
 [boards.adafruit_clue_nrf52840]
 # UF2 variant: the CLUE boots from the Adafruit nRF52 bootloader on top of
 # the SoftDevice. The layout owns the app-side partitions (code/storage/nvm
