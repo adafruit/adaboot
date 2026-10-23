@@ -18,6 +18,7 @@ config ADABOOT_BOARD
 	default y if $(BOARD) = "ek_ra8d1"
 	default y if $(BOARD) = "frdm_mcxn947"
 	default y if $(BOARD) = "frdm_rw612"
+	default y if $(BOARD) = "mimxrt1010_evk"
 	default y if $(BOARD) = "mimxrt1170_evk"
 	default y if $(BOARD) = "nrf5340dk"
 	default y if $(BOARD) = "nrf54h20dk"
