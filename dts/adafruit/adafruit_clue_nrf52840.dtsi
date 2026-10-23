@@ -12,7 +12,7 @@
  * replaces are deleted; the bootloader-owned regions pass through untouched.
  *
  * The internal flash hosts only app-side partitions (code/storage/nvm); the
- * CLUE's entire 2 MB GD25Q16 SPI NOR is the user filesystem (the board has
+ * CLUE's entire 2 MB QSPI flash is the user filesystem (the board has
  * native USB, so the node label is fatfs_partition).
  */
 &gd25q16 {
