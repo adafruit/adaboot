@@ -11,7 +11,7 @@
  * partitions this layout replaces are deleted.
  *
  * The internal flash hosts only app-side partitions (code/storage/nvm); the
- * ItsyBitsy's entire 2 MB GD25Q16 QSPI NOR is the user filesystem (the board
+ * ItsyBitsy's entire 2 MB QSPI flash is the user filesystem (the board
  * has native USB, so the node label is fatfs_partition).
  *
  * The layout is the same as the Feather nRF52840 Express: nvm_partition is
