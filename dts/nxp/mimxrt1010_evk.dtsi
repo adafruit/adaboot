@@ -18,7 +18,14 @@
 
 /* Bootloader UI: the entrance button comes from the board's
  * mcuboot-button0 alias (the user button). Point mcuboot-led0 at the
- * green LED so a CONFIG_MCUBOOT_INDICATION_LED build has a status LED. */
+ * green LED so a CONFIG_MCUBOOT_INDICATION_LED build has a status LED.
+ *
+ * The upstream board dts declares the LED (D25, User LD1) active low, but
+ * on the board it lights when GPIO_11 is high. */
+&green_led {
+	gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>;
+};
+
 / {
 	aliases {
 		mcuboot-led0 = &green_led;
