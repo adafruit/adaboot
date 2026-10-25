@@ -938,9 +938,15 @@ def plan_partitions_predefined(
             # partitions node of this device, the generated file must be
             # self-contained: re-emit the upstream partitions too (the
             # board dts still references some of their labels), instead of
-            # relying on nodes the glue removed.
+            # relying on nodes the glue removed. Upstream partitions whose
+            # reg the previously generated file overrides are re-emitted as
+            # well: leaving them out would drop the override and bring the
+            # upstream size back on the next --fix.
+            fork_sized = _fork_sized_partition_labels(edt)
             predefined = (
-                set() if dev_label in deleted_devices else {p[0] for p in upstream}
+                set()
+                if dev_label in deleted_devices
+                else {p[0] for p in upstream if p[0] not in fork_sized}
             )
             kept = sorted(upstream, key=lambda p: p[2])
 
@@ -1186,7 +1192,11 @@ def _defined_in_fork_dts(node):
     it are the planner's own earlier output, not upstream geometry to plan
     against.
     """
-    filename = getattr(node, "filename", "") or ""
+    return _in_fork_dts(getattr(node, "filename", "") or "")
+
+
+def _in_fork_dts(filename):
+    """True if filename is one of this fork's own dts/ files."""
     if not filename:
         return False
     try:
@@ -1194,6 +1204,31 @@ def _defined_in_fork_dts(node):
         return True
     except ValueError:
         return False
+
+
+def _fork_sized_partition_labels(edt):
+    """Labels of partitions whose ``reg`` comes from this fork's own dts/ files.
+
+    An upstream partition node can have its ``reg`` overridden by the
+    previously generated <board>-partitions.dtsi (e.g. a slot the planner
+    resized). The node itself is upstream's, but its geometry is the
+    planner's own earlier output, so it must be re-emitted, not treated as
+    an upstream partition the generated file can leave out. The labels match
+    the first element of extract_flash_devices()' partition tuples.
+    """
+    labels = set()
+    for node in edt.nodes:
+        parent = getattr(node, "parent", None)
+        if parent is None or parent.name != "partitions":
+            continue
+        # edtlib's Property has no source location; dtlib's does.
+        dt_node = getattr(node, "_node", None)
+        reg = dt_node.props.get("reg") if dt_node is not None else None
+        if reg is None or not _in_fork_dts(reg.filename):
+            continue
+        label_prop = node.props.get("label")
+        labels.add(label_prop.val if label_prop else (node.labels[0] if node.labels else node.name))
+    return labels
 
 
 def _has_upstream_predefined_mcuboot(edt):
