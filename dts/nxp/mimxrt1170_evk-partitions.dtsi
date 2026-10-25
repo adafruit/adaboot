@@ -15,9 +15,19 @@
 		/* Inherited from the upstream board dts and kept as-is
 		 * (not re-emitted here):
 		 *   mcuboot (boot_partition): 0x0 + DT_SIZE_K(128)
-		 *   image-0 (slot0_partition): 0x20000 + DT_SIZE_M(2)
-		 *   image-1 (slot1_partition): 0x720000 + DT_SIZE_M(2)
 		 */
+
+		slot0_partition: partition@20000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-0";
+			reg = <0x20000 DT_SIZE_M(2)>;
+		};
+
+		slot1_partition: partition@720000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-1";
+			reg = <0x720000 DT_SIZE_M(2)>;
+		};
 
 		storage_partition: partition@920000 {
 			compatible = "zephyr,mapped-partition";
