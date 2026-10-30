@@ -30,15 +30,21 @@
  * bootloader reads and clears it at boot (io_detect_boot_mode()). SDRAM
  * content survives the warm reset that follows the request, which is all a
  * button-less entrance needs; a power cycle simply drops the request.
+ *
+ * The block is kept out of the images by pointing zephyr,sram at a RAM node
+ * that stops 1 KB short, not by shrinking sdram0: the board MPU table sizes
+ * its SDRAM region from sdram0, and Arm MPU regions must be a power of two.
  */
-&sdram0 {
-	reg = <0x80000000 0x3fffc00>;
-};
-
 / {
 	chosen {
+		zephyr,sram = &app_sdram;
 		zephyr,bootloader-info = &boot_info0;
 		zephyr,boot-mode = &boot_mode0;
+	};
+
+	app_sdram: sram@80000000 {
+		compatible = "mmio-sram";
+		reg = <0x80000000 0x3fffc00>;
 	};
 
 	boot_info_sram: sram@83fffc00 {
