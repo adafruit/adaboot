@@ -62,7 +62,7 @@ set(MCUBOOT_LAYOUT_nrf54lm20dk_nrf54lm20a_cpuapp "${MCUBOOT_LAYOUT_nrf54lm20dk}"
 set(MCUBOOT_LAYOUT_nrf7002dk_nrf5340_cpuapp "${MCUBOOT_LAYOUT_nrf7002dk}" CACHE INTERNAL "nrf7002dk_nrf5340_cpuapp partition layout alias for nrf7002dk")
 set(MCUBOOT_LAYOUT_nucleo_n657x0_q_stm32n657xx "${MCUBOOT_LAYOUT_nucleo_n657x0_q}" CACHE INTERNAL "nucleo_n657x0_q_stm32n657xx partition layout alias for nucleo_n657x0_q")
 set(MCUBOOT_LAYOUT_nucleo_u575zi_q_stm32u575xx "${MCUBOOT_LAYOUT_nucleo_u575zi_q}" CACHE INTERNAL "nucleo_u575zi_q_stm32u575xx partition layout alias for nucleo_u575zi_q")
-set(MCUBOOT_LAYOUT_rpi_pico2_rp2350a_m33_w "${MCUBOOT_LAYOUT_rpi_pico2_w}" CACHE INTERNAL "rpi_pico2_rp2350a_m33_w partition layout alias for rpi_pico2_w")
+set(MCUBOOT_LAYOUT_rpi_pico2_rp2350a_m33_0_w "${MCUBOOT_LAYOUT_rpi_pico2_w}" CACHE INTERNAL "rpi_pico2_rp2350a_m33_0_w partition layout alias for rpi_pico2_w")
 set(MCUBOOT_LAYOUT_rpi_pico_rp2040_w "${MCUBOOT_LAYOUT_rpi_pico_w}" CACHE INTERNAL "rpi_pico_rp2040_w partition layout alias for rpi_pico_w")
 set(MCUBOOT_LAYOUT_stm32h750b_dk_stm32h750xx_ext_flash_app "${MCUBOOT_LAYOUT_stm32h750b_dk}" CACHE INTERNAL "stm32h750b_dk_stm32h750xx_ext_flash_app partition layout alias for stm32h750b_dk")
 
