@@ -264,7 +264,7 @@ mcuboot = false
 
 [boards.rpi_pico2_w]
 # RP2350 WiFi variant, same role as rpi_pico_w for the RP2040 generation.
-board = "rpi_pico2/rp2350a/m33/w"
+board = "rpi_pico2/rp2350a/m33_0/w"
 vendor = "raspberrypi"
 mcuboot = false
 
