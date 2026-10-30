@@ -1120,6 +1120,25 @@ class TestPredefinedMcuboot:
         assert 'label = "image-0"' in dtsi
         assert 'label = "image-1"' in dtsi
 
+    def test_fork_sized_upstream_partition_re_emitted(self):
+        """An upstream partition whose reg the generated dtsi overrides is re-emitted."""
+        flash = _flash_with_partitions("flash0", 4 * MB, 4096, _DA14695_PARTITIONS)
+        partitions_node = flash.children["partitions"]
+        partitions_node.name = "partitions"
+        boot = partitions_node.children["boot_partition"]
+        # The node is upstream's, but a previous --fix run's dtsi set its reg.
+        boot.parent = partitions_node
+        fork_reg = SimpleNamespace(filename=str(DTS_OUT_DIR / "vendor" / "board-partitions.dtsi"))
+        boot._node = SimpleNamespace(props={"reg": fork_reg})
+        edt = _make_edt(flash, boot)
+        result = plan_partitions(edt)
+        _, _, _, parts, predefined = result[0]
+        # Left out of the generated file, the boot partition would get its
+        # upstream size back on the next --fix.
+        assert "mcuboot" not in predefined
+        assert "mcuboot" in [p[0] for p in parts]
+        assert 'label = "mcuboot"' in generate_partitions_dtsi(result)
+
     def test_existing_app_partitions_replaced(self):
         """Existing filesystem/nvm partitions from a prior overlay should be replaced."""
         # Simulate da14695 with its overlay-added filesystem partition. The
