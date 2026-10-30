@@ -1,7 +1,10 @@
 /* Delete Zephyr-default partitions before redefining them. */
-&flash0 { /delete-node/ partitions; };
-&flash1 { /delete-node/ partitions; };
+&code_flash { /delete-node/ partitions; };
+&data_flash { /delete-node/ partitions; };
 &s28hl512t { /delete-node/ partitions; };
+
+/* v4.5.0 moved the S28HL512T under a disabled-by-default OSPI NOR controller. */
+&ext_flash_ctrl { status = "okay"; };
 
 / {
 	aliases {

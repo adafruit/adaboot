@@ -9,7 +9,7 @@
  * this file.
  */
 
-&flash0 {
+&code_flash {
 	partitions {
 		compatible = "fixed-partitions";
 		#address-cells = <1>;
@@ -50,7 +50,7 @@
 	};
 };
 
-&flash1 {
+&data_flash {
 	partitions {
 		compatible = "fixed-partitions";
 		#address-cells = <1>;
