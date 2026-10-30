@@ -111,6 +111,17 @@ vendor = "nxp"
 board = "frdm_rw612"
 vendor = "nxp"
 
+[boards.mimxrt1010_evk]
+board = "mimxrt1010_evk"
+vendor = "nxp"
+# No radio / wireless loading: keep the fork's single-app layout (upstream's
+# image-1 is dropped). slot0 is pinned so that storage + nvm end at 0x200000
+# and the filesystem starts there and fills the rest of the flash, the same
+# CIRCUITPY region as ports/mimxrt10xx, so updating from the classic port
+# leaves CIRCUITPY intact.
+single_app = true
+slot_size = 1884
+
 [boards.mimxrt1170_evk]
 board = "mimxrt1170_evk@A/mimxrt1176/cm7"
 vendor = "nxp"
