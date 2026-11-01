@@ -13,6 +13,8 @@
 
 config ADABOOT_BOARD
 	bool
+	default y if $(BOARD) = "adafruit_metro_m7"
+	default y if $(BOARD) = "adafruit_metro_m7_airlift"
 	default y if $(BOARD) = "da14695_dk_usb"
 	default y if $(BOARD) = "ek_ra6m5"
 	default y if $(BOARD) = "ek_ra8d1"

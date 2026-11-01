@@ -65,9 +65,11 @@ UF2_BOARDS ?= $(shell python3 $(ADABOOT_DIR)/tools/uf2_updater.py list)
 # BOARD uses the CircuitPython-style id <vendor>_<board> (e.g.
 # nordic_nrf54lm20dk): the prefix names the vendor directory the board's dtsi
 # and conf fragments live in; stripping it yields the partition key used by
-# dts/boards.mk, tools/boards.toml and the conf/ file names.
+# dts/boards.mk, tools/boards.toml and the conf/ file names. A key that already
+# starts with its vendor (e.g. adafruit_metro_m7) is its own id, so BOARD is
+# used as the key when dts/boards.mk defines it.
 BOARD_VENDOR := $(word 1,$(subst _, ,$(BOARD)))
-BOARD_KEY := $(patsubst $(BOARD_VENDOR)_%,%,$(BOARD))
+BOARD_KEY := $(if $($(BOARD)_BOARD),$(BOARD),$(patsubst $(BOARD_VENDOR)_%,%,$(BOARD)))
 ifdef BOARD
 WEST_BOARD := $($(BOARD_KEY)_BOARD)
 OVERLAY    := $(ADABOOT_DIR)/$($(BOARD_KEY)_DTSI)
