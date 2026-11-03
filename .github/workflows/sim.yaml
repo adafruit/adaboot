@@ -3,7 +3,20 @@ on:
   push:
     branches:
       - main
+    # ADABOOT-CHANGE: run only when something the simulator builds or runs
+    # changes. Board layouts, conf/, dts/ and boot/zephyr/ don't reach the sim.
+    paths: &sim_paths
+      - "boot/bootutil/**"
+      - "sim/**"
+      - "ext/**"
+      - "ci/sim_install.sh"
+      - "ci/sim_run.sh"
+      - "ci/get_features.py"
+      - "ci/check-signed-off-by.sh"
+      - ".github/workflows/sim.yaml"
   pull_request:
+    # ADABOOT-CHANGE: same paths as push above.
+    paths: *sim_paths
 
 name: Sim
 
