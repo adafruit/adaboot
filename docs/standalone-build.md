@@ -193,3 +193,4 @@ make update                      # re-run west update (e.g. after bumping the Ze
 - The partition layout comes from this fork's `dts/`; if you edit a dtsi you see
   the change immediately (the overlay is read from this tree, not from `deps/`).
 - Everything under `deps/`, `.west/`, and `build-*/` is git-ignored.
+<!-- Throwaway change to test the Sim paths filter. Do not merge. -->
