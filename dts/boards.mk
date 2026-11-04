@@ -14,7 +14,15 @@
 #                  matching CircuitPython's BOARD ids; a key that already
 #                  starts with its vendor name is its own id)
 
-MCUBOOT_BOARDS := da14695_dk_usb ek_ra6m5 ek_ra8d1 frdm_mcxn947 frdm_rw612 mimxrt1170_evk nrf5340dk nrf54h20dk nrf54l15dk nrf54lm20dk nrf7002dk nucleo_n657x0_q nucleo_u575zi_q siwx917_dk2605a stm32h750b_dk stm32h7b3i_dk stm32wba65i_dk1
+MCUBOOT_BOARDS := adafruit_metro_m7 adafruit_metro_m7_airlift da14695_dk_usb ek_ra6m5 ek_ra8d1 frdm_mcxn947 frdm_rw612 mimxrt1010_evk mimxrt1170_evk nrf5340dk nrf54h20dk nrf54l15dk nrf54lm20dk nrf7002dk nucleo_n657x0_q nucleo_u575zi_q siwx917_dk2605a stm32h750b_dk stm32h7b3i_dk stm32wba65i_dk1
+
+adafruit_metro_m7_BOARD := adafruit_metro_m7
+adafruit_metro_m7_DTSI := dts/adafruit/adafruit_metro_m7.dtsi
+adafruit_metro_m7_BOARD_ID := adafruit_metro_m7
+
+adafruit_metro_m7_airlift_BOARD := adafruit_metro_m7_airlift
+adafruit_metro_m7_airlift_DTSI := dts/adafruit/adafruit_metro_m7_airlift.dtsi
+adafruit_metro_m7_airlift_BOARD_ID := adafruit_metro_m7_airlift
 
 da14695_dk_usb_BOARD := da14695_dk_usb
 da14695_dk_usb_DTSI := dts/renesas/da14695_dk_usb.dtsi
@@ -35,6 +43,10 @@ frdm_mcxn947_BOARD_ID := nxp_frdm_mcxn947
 frdm_rw612_BOARD := frdm_rw612
 frdm_rw612_DTSI := dts/nxp/frdm_rw612.dtsi
 frdm_rw612_BOARD_ID := nxp_frdm_rw612
+
+mimxrt1010_evk_BOARD := mimxrt1010_evk
+mimxrt1010_evk_DTSI := dts/nxp/mimxrt1010_evk.dtsi
+mimxrt1010_evk_BOARD_ID := nxp_mimxrt1010_evk
 
 mimxrt1170_evk_BOARD := mimxrt1170_evk@A/mimxrt1176/cm7
 mimxrt1170_evk_DTSI := dts/nxp/mimxrt1170_evk.dtsi

@@ -18,11 +18,14 @@ set(MCUBOOT_LAYOUT_adafruit_feather_nrf52840 "${CMAKE_CURRENT_LIST_DIR}/adafruit
 set(MCUBOOT_LAYOUT_adafruit_feather_rp2040 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_feather_rp2040.dtsi" CACHE INTERNAL "adafruit_feather_rp2040 partition layout")
 set(MCUBOOT_LAYOUT_adafruit_itsybitsy_nrf52840 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_itsybitsy_nrf52840.dtsi" CACHE INTERNAL "adafruit_itsybitsy_nrf52840 partition layout")
 set(MCUBOOT_LAYOUT_adafruit_macropad_rp2040 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_macropad_rp2040.dtsi" CACHE INTERNAL "adafruit_macropad_rp2040 partition layout")
+set(MCUBOOT_LAYOUT_adafruit_metro_m7 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_metro_m7.dtsi" CACHE INTERNAL "adafruit_metro_m7 partition layout")
+set(MCUBOOT_LAYOUT_adafruit_metro_m7_airlift "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_metro_m7_airlift.dtsi" CACHE INTERNAL "adafruit_metro_m7_airlift partition layout")
 set(MCUBOOT_LAYOUT_da14695_dk_usb "${CMAKE_CURRENT_LIST_DIR}/renesas/da14695_dk_usb.dtsi" CACHE INTERNAL "da14695_dk_usb partition layout")
 set(MCUBOOT_LAYOUT_ek_ra6m5 "${CMAKE_CURRENT_LIST_DIR}/renesas/ek_ra6m5.dtsi" CACHE INTERNAL "ek_ra6m5 partition layout")
 set(MCUBOOT_LAYOUT_ek_ra8d1 "${CMAKE_CURRENT_LIST_DIR}/renesas/ek_ra8d1.dtsi" CACHE INTERNAL "ek_ra8d1 partition layout")
 set(MCUBOOT_LAYOUT_frdm_mcxn947 "${CMAKE_CURRENT_LIST_DIR}/nxp/frdm_mcxn947.dtsi" CACHE INTERNAL "frdm_mcxn947 partition layout")
 set(MCUBOOT_LAYOUT_frdm_rw612 "${CMAKE_CURRENT_LIST_DIR}/nxp/frdm_rw612.dtsi" CACHE INTERNAL "frdm_rw612 partition layout")
+set(MCUBOOT_LAYOUT_mimxrt1010_evk "${CMAKE_CURRENT_LIST_DIR}/nxp/mimxrt1010_evk.dtsi" CACHE INTERNAL "mimxrt1010_evk partition layout")
 set(MCUBOOT_LAYOUT_mimxrt1170_evk "${CMAKE_CURRENT_LIST_DIR}/nxp/mimxrt1170_evk.dtsi" CACHE INTERNAL "mimxrt1170_evk partition layout")
 set(MCUBOOT_LAYOUT_native_sim "${CMAKE_CURRENT_LIST_DIR}/native/native_sim.dtsi" CACHE INTERNAL "native_sim partition layout")
 set(MCUBOOT_LAYOUT_nrf5340bsim "${CMAKE_CURRENT_LIST_DIR}/native/nrf5340bsim.dtsi" CACHE INTERNAL "nrf5340bsim partition layout")
@@ -68,11 +71,14 @@ set(MCUBOOT_LAYOUT_BOARDS
     adafruit_feather_rp2040
     adafruit_itsybitsy_nrf52840
     adafruit_macropad_rp2040
+    adafruit_metro_m7
+    adafruit_metro_m7_airlift
     da14695_dk_usb
     ek_ra6m5
     ek_ra8d1
     frdm_mcxn947
     frdm_rw612
+    mimxrt1010_evk
     mimxrt1170_evk
     native_sim
     nrf5340bsim
@@ -96,11 +102,14 @@ set(MCUBOOT_LAYOUT_BOARDS
 )
 
 set(MCUBOOT_BOARDS
+    adafruit_metro_m7
+    adafruit_metro_m7_airlift
     da14695_dk_usb
     ek_ra6m5
     ek_ra8d1
     frdm_mcxn947
     frdm_rw612
+    mimxrt1010_evk
     mimxrt1170_evk
     nrf5340dk
     nrf54h20dk
