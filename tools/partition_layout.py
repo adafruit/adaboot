@@ -1583,8 +1583,12 @@ def plan_partitions(
         # mcuboot's swap algorithm works across the two flash devices.
         max_erase = max(int_erase, ext_erase)
 
-        # Internal: mcuboot + slot0
-        boot_size = align_up(MCUBOOT_SIZE, int_erase)
+        # Internal: mcuboot + slot0. A boards.toml boot_size pin replaces
+        # the default.
+        if boot_size_kb is not None:
+            boot_size = align_up(boot_size_kb * KB, int_erase)
+        else:
+            boot_size = align_up(MCUBOOT_SIZE, int_erase)
         slot0_offset = boot_size
 
         # Some boards' internal flash cannot host an app slot after the
@@ -1594,7 +1598,9 @@ def plan_partitions(
         # move to the external one, planned like the external-only topology.
         # The slots are the same size and need no extra scratch sector: the
         # fork defaults MCUBOOT_MODE_SINGLE_APP (no swap).
-        if int_size - slot0_offset < SLOT0_MIN_SIZE:
+        # A slot_size pin keeps slot0 in internal flash: the board's
+        # external flash may not be executable (e.g. plain SPI NOR).
+        if slot_size_kb is None and int_size - slot0_offset < SLOT0_MIN_SIZE:
             result.append(
                 (
                     int_label,
@@ -1644,6 +1650,8 @@ def plan_partitions(
             slot0_size = align_down(
                 int_size - slot0_offset - storage_size - nvm_size, int_erase
             )
+            if slot_size_kb is not None:
+                slot0_size = min(slot0_size, align_down(slot_size_kb * KB, int_erase))
             int_parts = [
                 ("mcuboot", "boot_partition", 0, boot_size),
                 ("image-0", "slot0_partition", slot0_offset, slot0_size),
@@ -1714,15 +1722,22 @@ def plan_partitions(
         # ── Internal only ──
         int_label, int_size, int_erase = internal[0]
 
-        boot_size = align_up(MCUBOOT_SIZE, int_erase)
+        # A boards.toml boot_size / slot_size pin replaces the defaults.
+        if boot_size_kb is not None:
+            boot_size = align_up(boot_size_kb * KB, int_erase)
+        else:
+            boot_size = align_up(MCUBOOT_SIZE, int_erase)
         slot0_offset = boot_size
         # Reserve space at the end for storage + nvm + filesystem.
         # NVM is 1 erase page; storage is STORAGE_SIZE.
         storage_size = align_up(STORAGE_SIZE, int_erase)
         nvm_size = int_erase if not data_flash else 0
-        # Give slot0 roughly half the remaining space.
-        remaining = int_size - boot_size - storage_size - nvm_size
-        slot0_size = align_down(remaining // 2, int_erase)
+        if slot_size_kb is not None:
+            slot0_size = align_up(slot_size_kb * KB, int_erase)
+        else:
+            # Give slot0 roughly half the remaining space.
+            remaining = int_size - boot_size - storage_size - nvm_size
+            slot0_size = align_down(remaining // 2, int_erase)
         storage_offset = slot0_offset + slot0_size
         nvm_offset = storage_offset + storage_size
         fs_offset = nvm_offset + nvm_size
