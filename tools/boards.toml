@@ -333,6 +333,33 @@ vendor = "adafruit"
 single_app = true
 slot_size = 1884
 
+[boards.adafruit_metro_ch32v407]
+# Metro CH32V407 (WCH QingKe V3V, 992 KB internal flash, 4 KB sectors, SPI
+# NOR). Adaboot replaces the board's TinyUF2 bootloader. The SPI NOR is not
+# memory-mapped, so slot0 stays internal (the slot_size pin) and fills it up
+# to storage and nvm; the filesystem takes the SPI NOR.
+board = "adafruit_metro_ch32v407"
+vendor = "adafruit"
+single_app = true
+boot_size = 64
+slot_size = 892
+
+[boards.adafruit_metro_ch32v407.external_flash]
+label = "spi_flash"
+erase_block_size = 4096
+
+[boards.adafruit_metro_ch32v467]
+# Metro CH32V467: the same flash and layout as adafruit_metro_ch32v407.
+board = "adafruit_metro_ch32v467"
+vendor = "adafruit"
+single_app = true
+boot_size = 64
+slot_size = 892
+
+[boards.adafruit_metro_ch32v467.external_flash]
+label = "spi_flash"
+erase_block_size = 4096
+
 [boards.native_sim]
 # Host simulation (native_sim/native): no real flash, the layout just shapes
 # upstream's simulated flash for the port (see dts/native/native_sim.dtsi).

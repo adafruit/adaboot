@@ -18,6 +18,8 @@ set(MCUBOOT_LAYOUT_adafruit_feather_nrf52840 "${CMAKE_CURRENT_LIST_DIR}/adafruit
 set(MCUBOOT_LAYOUT_adafruit_feather_rp2040 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_feather_rp2040.dtsi" CACHE INTERNAL "adafruit_feather_rp2040 partition layout")
 set(MCUBOOT_LAYOUT_adafruit_itsybitsy_nrf52840 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_itsybitsy_nrf52840.dtsi" CACHE INTERNAL "adafruit_itsybitsy_nrf52840 partition layout")
 set(MCUBOOT_LAYOUT_adafruit_macropad_rp2040 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_macropad_rp2040.dtsi" CACHE INTERNAL "adafruit_macropad_rp2040 partition layout")
+set(MCUBOOT_LAYOUT_adafruit_metro_ch32v407 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_metro_ch32v407.dtsi" CACHE INTERNAL "adafruit_metro_ch32v407 partition layout")
+set(MCUBOOT_LAYOUT_adafruit_metro_ch32v467 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_metro_ch32v467.dtsi" CACHE INTERNAL "adafruit_metro_ch32v467 partition layout")
 set(MCUBOOT_LAYOUT_adafruit_metro_m7 "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_metro_m7.dtsi" CACHE INTERNAL "adafruit_metro_m7 partition layout")
 set(MCUBOOT_LAYOUT_adafruit_metro_m7_airlift "${CMAKE_CURRENT_LIST_DIR}/adafruit/adafruit_metro_m7_airlift.dtsi" CACHE INTERNAL "adafruit_metro_m7_airlift partition layout")
 set(MCUBOOT_LAYOUT_da14695_dk_usb "${CMAKE_CURRENT_LIST_DIR}/renesas/da14695_dk_usb.dtsi" CACHE INTERNAL "da14695_dk_usb partition layout")
@@ -71,6 +73,8 @@ set(MCUBOOT_LAYOUT_BOARDS
     adafruit_feather_rp2040
     adafruit_itsybitsy_nrf52840
     adafruit_macropad_rp2040
+    adafruit_metro_ch32v407
+    adafruit_metro_ch32v467
     adafruit_metro_m7
     adafruit_metro_m7_airlift
     da14695_dk_usb
@@ -102,6 +106,8 @@ set(MCUBOOT_LAYOUT_BOARDS
 )
 
 set(MCUBOOT_BOARDS
+    adafruit_metro_ch32v407
+    adafruit_metro_ch32v467
     adafruit_metro_m7
     adafruit_metro_m7_airlift
     da14695_dk_usb
