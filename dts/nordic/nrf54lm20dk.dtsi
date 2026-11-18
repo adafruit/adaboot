@@ -51,9 +51,13 @@
  * BLINFO TLVs via boot_write_shared_data()); the application reads the
  * same region to answer the SMP bootloader-info command (RETENTION_
  * BOOTLOADER_INFO_TYPE_MCUBOOT). Carved here because this dtsi applies to
- * both images. */
-&cpuapp_sram {
-	reg = <0x20000000 0x7f800>;
+ * both images.
+ *
+ * zephyr,sram is cpuapp_sram_app, which Zephyr requires to stay inside
+ * cpuapp_sram, so shorten cpuapp_sram_app rather than cpuapp_sram. Its reg
+ * is relative to cpuapp_sram and starts at 0x60. */
+&cpuapp_sram_app {
+	reg = <0x60 (0x7f800 - 0x60)>;
 };
 
 / {
