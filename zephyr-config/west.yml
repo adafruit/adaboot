@@ -2,7 +2,7 @@ manifest:
   projects:
     - name: zephyr
       url: https://github.com/adafruit/zephyr
-      revision: 870e2e18690178c1811e44cb6e1148ecff9c1a22
+      revision: 87f27e4e1ce528367de5936cd4ee9fa4c32d42a8
       clone-depth: 100
       path: zephyr
       import:

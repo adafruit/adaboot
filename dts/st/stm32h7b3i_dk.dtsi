@@ -1,5 +1,5 @@
 /* Delete Zephyr-default partitions before redefining them. */
-&mx25lm51245 { /delete-node/ partitions; };
+&ext_flash_ctrl { /delete-node/ partitions; };
 
 /* Enable the OTG HS controller for the bootloader's UF2 drive. The board
  * overlay in the application enables it as well; this keeps the bootloader
