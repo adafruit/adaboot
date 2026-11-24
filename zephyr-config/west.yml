@@ -1,7 +1,7 @@
 manifest:
   projects:
     - name: zephyr
-      url: https://github.com/mikeysklar/zephyr
+      url: https://github.com/adafruit/zephyr
       revision: 0ed3d0a518122e7d0392927f75ea1395b2d22504
       clone-depth: 100
       path: zephyr
