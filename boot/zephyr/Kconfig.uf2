@@ -125,7 +125,7 @@ config MCUBOOT_UF2_WRITABLE_BOOTLOADER
 	bool "Allow UF2 writes to the MCUboot partition (dangerous)"
 	default n
 	help
-	  If y, UF2 blocks targeting the MCUboot partition (fixed partition
+	  If y, UF2 blocks targeting the MCUboot partition (boot_partition,
 	  labeled "mcuboot") are written there. MCUboot is actively executing
 	  while UF2 mode is active, so this is only safe on SoCs that can
 	  write flash while executing from it. It makes CURRENT.UF2 readbacks
