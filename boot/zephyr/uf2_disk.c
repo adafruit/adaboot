@@ -34,6 +34,11 @@ static struct {
 } uf2_state_buf;
 
 static struct uf2_cfg uf2_cfg;
+
+#if CONFIG_MCUBOOT_UF2_ERASE_MAP_SIZE > 0
+/* Which erase blocks are erased, see uf2_set_erase_map() */
+static uint8_t uf2_erase_map[CONFIG_MCUBOOT_UF2_ERASE_MAP_SIZE];
+#endif
 static bool disk_registered;
 
 /* Writable flash regions (partitions). Region 0 is always the primary
@@ -439,6 +444,10 @@ int uf2_disk_register(void)
 
 	/* Initialize UF2 state */
 	uf2_init(&uf2_state_buf.state, CONFIG_MCUBOOT_UF2_MAX_BLOCKS);
+#if CONFIG_MCUBOOT_UF2_ERASE_MAP_SIZE > 0
+	uf2_set_erase_map(&uf2_state_buf.state, uf2_erase_map,
+			  sizeof(uf2_erase_map) * 8);
+#endif
 
 	/* Register the virtual disk */
 	rc = disk_access_register(&uf2_disk_info);

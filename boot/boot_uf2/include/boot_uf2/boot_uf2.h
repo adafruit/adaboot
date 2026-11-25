@@ -171,6 +171,13 @@ struct uf2_state {
 	/* Progressive erase frontier per writable region (index 0 is the
 	 * legacy single region). Region-relative offset. */
 	uint32_t erase_frontier[UF2_MAX_REGIONS];
+	/* Optional, see uf2_set_erase_map(): one bit per erase block of the
+	 * regions, in region order, set once the block is erased. With it,
+	 * only the erase blocks payloads land in are erased; without it,
+	 * everything from a region's start up to its highest write, the gaps
+	 * between payloads included. */
+	uint8_t *erase_map;
+	uint32_t erase_map_bits;
 	bool     complete;
 	/* Bitmask tracking which blocks have been received.
 	 * Size determined by CONFIG_MCUBOOT_UF2_MAX_BLOCKS / 8.
@@ -185,6 +192,19 @@ struct uf2_state {
  * @param max_blocks Maximum number of UF2 blocks supported
  */
 void uf2_init(struct uf2_state *state, uint32_t max_blocks);
+
+/**
+ * @brief Erase only the erase blocks that payloads land in
+ *
+ * Call after uf2_init(). A region whose erase blocks do not all fit in the
+ * map (after those of the regions before it) is erased progressively
+ * instead, as without a map.
+ *
+ * @param state UF2 processing state
+ * @param map   Storage for the map, cleared here
+ * @param bits  Number of bits in @p map
+ */
+void uf2_set_erase_map(struct uf2_state *state, uint8_t *map, uint32_t bits);
 
 /**
  * @brief Process a single UF2 block

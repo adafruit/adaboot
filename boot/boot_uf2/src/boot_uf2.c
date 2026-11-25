@@ -12,6 +12,13 @@ void uf2_init(struct uf2_state *state, uint32_t max_blocks)
 	memset(state, 0, sizeof(*state) + (max_blocks + 7) / 8);
 }
 
+void uf2_set_erase_map(struct uf2_state *state, uint8_t *map, uint32_t bits)
+{
+	memset(map, 0, (bits + 7) / 8);
+	state->erase_map = map;
+	state->erase_map_bits = bits;
+}
+
 /* Scan a UF2 block's extension tags (flag UF2_FLAG_EXTENSION_TAGS) for
  * one of @p tag_type. Records live right after the payload, each
  * [size:1 (size byte + 3-byte type + payload)][type:3 LE][payload]
@@ -150,6 +157,53 @@ static int erase_up_to(const struct uf2_cfg *cfg, struct uf2_state *state,
 			return rc;
 		}
 		*frontier += len;
+	}
+
+	return 0;
+}
+
+/**
+ * Erase what a write of @p len bytes at region offset @p offset needs. With
+ * an erase map, that is the erase blocks it lands in that are not erased
+ * yet, so that what lies between payloads is left alone (a boot chain
+ * region may hold more than the file brings, e.g. a partition table in
+ * front of the payloads). Without one, or when the region does not fit in
+ * the map, erase progressively up to the write.
+ */
+static int erase_for_write(const struct uf2_cfg *cfg, struct uf2_state *state,
+			   uint8_t region, uint32_t offset, uint32_t len)
+{
+	uint32_t region_size = uf2_region_size(cfg, region);
+	uint32_t es = cfg->erase_size;
+	uint32_t base = 0;
+	uint32_t count = (region_size + es - 1) / es;
+
+	for (uint8_t i = 0; i < region; i++) {
+		base += (uf2_region_size(cfg, i) + es - 1) / es;
+	}
+
+	if (state->erase_map == NULL || base + count > state->erase_map_bits) {
+		return erase_up_to(cfg, state, region, offset + len);
+	}
+
+	for (uint32_t blk = offset / es; blk <= (offset + len - 1) / es; blk++) {
+		uint32_t bit = base + blk;
+		uint8_t mask = 1u << (bit % 8);
+		uint32_t start = blk * es;
+		uint32_t elen = es;
+		int rc;
+
+		if (state->erase_map[bit / 8] & mask) {
+			continue;
+		}
+		if (start + elen > region_size) {
+			elen = region_size - start;
+		}
+		rc = cfg->erase(start, elen, uf2_region_ctx(cfg, region));
+		if (rc != 0) {
+			return rc;
+		}
+		state->erase_map[bit / 8] |= mask;
 	}
 
 	return 0;
@@ -308,9 +362,9 @@ int uf2_process_block(const struct uf2_cfg *cfg, struct uf2_state *state,
 		return 0; /* Duplicate, ignore */
 	}
 
-	/* Progressive erase: ensure flash is erased up to this write */
-	rc = erase_up_to(cfg, state, (uint8_t)region,
-			 offset + block->payload_size);
+	/* Erase what this write needs (see erase_for_write()) */
+	rc = erase_for_write(cfg, state, (uint8_t)region, offset,
+			     block->payload_size);
 	if (rc != 0) {
 		return rc;
 	}
