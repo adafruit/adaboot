@@ -20,7 +20,10 @@ BOOT_LOG_MODULE_DECLARE(mcuboot);
 #define SECTOR_SIZE         512
 
 /* Disk geometry */
-#define NUM_FAT_SECTORS     64
+/* Enough FAT for every data sector of the disk (256 entries per sector):
+ * with fewer, the clusters past the FAT's end cannot be allocated, and a
+ * large CURRENT.UF2 leaves no room for the file that is copied in. */
+#define NUM_FAT_SECTORS     256
 #define NUM_ROOT_DIR_SECTORS 4
 #define ROOT_DIR_ENTRIES     (NUM_ROOT_DIR_SECTORS * (SECTOR_SIZE / 32))
 #define RESERVED_SECTORS     1
@@ -51,7 +54,13 @@ static uint32_t current_uf2_num_blocks(const struct uf2_cfg *cfg)
 	if (cfg->readback_size == 0 || cfg->read == NULL) {
 		return 0;
 	}
-	return (cfg->readback_size + UF2_PAYLOAD_SIZE - 1) / UF2_PAYLOAD_SIZE;
+	uint32_t blocks = (cfg->readback_size + UF2_PAYLOAD_SIZE - 1) / UF2_PAYLOAD_SIZE;
+
+	/* Never more than the data area holds, next to the two small files */
+	if (blocks > TOTAL_SECTORS - DATA_START_SECTOR - 2) {
+		blocks = TOTAL_SECTORS - DATA_START_SECTOR - 2;
+	}
+	return blocks;
 }
 
 static void write_u16_le(uint8_t *buf, uint16_t val)
