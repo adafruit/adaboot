@@ -288,13 +288,13 @@ static void boot_update_enter(void)
      * that wrote the primary (application) slot triggers a swap on
      * reboot; a transfer targeting only another partition (e.g. the
      * storage/filesystem partition) must not. */
-#ifndef CONFIG_SINGLE_APPLICATION_SLOT
+#if !defined(CONFIG_SINGLE_APPLICATION_SLOT) && !defined(CONFIG_SINGLE_APPLICATION_SLOT_RAM_LOAD)
     bool app_written = uf2_disk_primary_written();
 #endif
 
     uf2_disk_close();
 
-#ifndef CONFIG_SINGLE_APPLICATION_SLOT
+#if !defined(CONFIG_SINGLE_APPLICATION_SLOT) && !defined(CONFIG_SINGLE_APPLICATION_SLOT_RAM_LOAD)
     /* Dual slot: mark secondary image as pending for swap */
     if (app_written) {
         rc = boot_set_pending(0);
@@ -359,13 +359,13 @@ static void boot_uf2_enter(void)
 
     /* Only run application-swap bookkeeping if the primary slot was
      * written; see boot_update_enter() above. */
-#ifndef CONFIG_SINGLE_APPLICATION_SLOT
+#if !defined(CONFIG_SINGLE_APPLICATION_SLOT) && !defined(CONFIG_SINGLE_APPLICATION_SLOT_RAM_LOAD)
     bool app_written = uf2_disk_primary_written();
 #endif
 
     uf2_disk_close();
 
-#ifndef CONFIG_SINGLE_APPLICATION_SLOT
+#if !defined(CONFIG_SINGLE_APPLICATION_SLOT) && !defined(CONFIG_SINGLE_APPLICATION_SLOT_RAM_LOAD)
     /* Dual slot: mark secondary image as pending for swap */
     if (app_written) {
         rc = boot_set_pending(0);

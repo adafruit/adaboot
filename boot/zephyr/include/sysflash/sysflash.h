@@ -13,7 +13,8 @@
 #include <zephyr/devicetree/partitions.h>
 #include <zephyr/sys/util_macro.h>
 
-#if !defined(CONFIG_SINGLE_APPLICATION_SLOT) && !defined(CONFIG_MCUBOOT_BOOTLOADER_MODE_SINGLE_APP)
+#if !defined(CONFIG_SINGLE_APPLICATION_SLOT) && !defined(CONFIG_MCUBOOT_BOOTLOADER_MODE_SINGLE_APP) && \
+    !defined(CONFIG_SINGLE_APPLICATION_SLOT_RAM_LOAD)
 
 /* Each pair of slots is separated by , and there is no terminating character */
 #define FLASH_AREA_IMAGE_0_SLOTS    slot0_partition, slot1_partition
