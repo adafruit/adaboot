@@ -24,7 +24,7 @@
 #include "usbd_boot.h"
 #endif /* CONFIG_MCUBOOT_UF2 || CONFIG_BOOT_SERIAL_CDC_ACM */
 
-#if defined(CONFIG_BOOT_DISABLE_CACHES)
+#if defined(CONFIG_BOOT_DISABLE_CACHES) || defined(CONFIG_CPU_AARCH32_CORTEX_A)
 #include <zephyr/cache.h>
 #endif
 
@@ -220,6 +220,35 @@ void do_boot(const struct boot_rsp *rsp)
 
 #ifdef CONFIG_CPU_CORTEX_M
 	((void (*)(void))vt->reset)();
+#elif defined(CONFIG_CPU_AARCH32_CORTEX_A)
+	/*
+	 * Hand over the way a first stage boot loader does: the MMU and the
+	 * caches off. The image was copied in through the data cache, so
+	 * clean that to memory first. After the clean only the stack is
+	 * written, which the application doesn't need, so the rest runs
+	 * without it: turn off the MMU (the application's RAM need not be
+	 * executable in our tables) and the caches, then drop what the
+	 * instruction side holds and jump.
+	 */
+	(void)sys_cache_data_flush_all();
+	__asm__ volatile(
+		"   cpsid   if\n"
+		"   mrc     p15, 0, r1, c1, c0, 0\n"
+		/* SCTLR: M, C and I off */
+		"   bic     r1, r1, #0x5\n"
+		"   bic     r1, r1, #0x1000\n"
+		"   mcr     p15, 0, r1, c1, c0, 0\n"
+		"   isb\n"
+		"   mov     r1, #0\n"
+		/* ICIALLU, BPIALL */
+		"   mcr     p15, 0, r1, c7, c5, 0\n"
+		"   mcr     p15, 0, r1, c7, c5, 6\n"
+		"   dsb\n"
+		"   isb\n"
+		"   bx      %0\n"
+		:
+		: "r" (&vt->reset)
+		: "r1", "memory");
 #else
 	/* Some ARM CPUs like the Cortex-R5 can run in thumb mode but reset into ARM
 	 * mode (depending on a CPU signal configurations). To do the switch into ARM
