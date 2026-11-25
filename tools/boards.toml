@@ -49,6 +49,12 @@
 #                              # external flash (after slot1) instead of the
 #                              # internal tail, so slot0 grows into the space.
 #
+# planned = false              # A mcuboot board whose layout the planner
+#                              # cannot make (e.g. a flash device that is
+#                              # part of an SD card). --fix refuses it;
+#                              # --gen-list takes the slot geometry from the
+#                              # hand-maintained dtsi instead of planning.
+#
 # [boards.<key>]
 # single_app = true            # plan a single-app layout (no image-1) even
 #                              # when the flash geometry would allow a second
