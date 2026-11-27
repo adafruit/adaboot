@@ -385,18 +385,18 @@ int uf2_disk_register(void)
 #endif
 
 #if defined(CONFIG_MCUBOOT_UF2_WRITABLE_BOOTLOADER)
-#if PARTITION_EXISTS(mcuboot)
+#if PARTITION_EXISTS(boot_partition)
 	/* MCUboot's own partition. Off by default: the bootloader is actively
 	 * executing while UF2 mode is active. Only enable where the SoC can
-	 * write flash while executing from it; it makes CURRENT.UF2 readbacks
-	 * fully restorable by drag-and-drop. */
-	rc = uf2_disk_add_region(PARTITION_ID(mcuboot), "mcuboot");
+	 * write flash while executing from it (or runs from RAM); it makes
+	 * CURRENT.UF2 readbacks fully restorable by drag-and-drop. */
+	rc = uf2_disk_add_region(PARTITION_ID(boot_partition), "mcuboot");
 	if (rc != 0) {
 		BOOT_LOG_WRN("Bootloader partition not writable via UF2: %d", rc);
 	}
 #else
 	BOOT_LOG_WRN("MCUBOOT_UF2_WRITABLE_BOOTLOADER set but devicetree has "
-		     "no partition labeled 'mcuboot'");
+		     "no partition labeled 'boot_partition'");
 #endif
 #endif
 
