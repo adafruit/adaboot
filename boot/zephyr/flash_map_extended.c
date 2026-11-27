@@ -27,7 +27,11 @@ BUILD_ASSERT((CONFIG_MCUBOOT_LOGICAL_SECTOR_SIZE &
              "CONFIG_MCUBOOT_LOGICAL_SECTOR_SIZE must be a power of two");
 #endif
 
-#define FLASH_PARTITION_ADDRESS(partition) (PARTITION_ADDRESS(partition) - PARTITION_OFFSET(partition))
+/* A device without a memory map (a disk, say) has no reg: its base is 0 */
+#define FLASH_PARTITION_ADDRESS(partition)                                      \
+    COND_CODE_1(DT_REG_HAS_IDX(PARTITION_MTD(partition), 0),                    \
+                (PARTITION_ADDRESS(partition) - PARTITION_OFFSET(partition)),   \
+                (0))
 
 #define FLASH_PARTITION_DEV_UNIQUE(n, m) (PARTITION_EXISTS(n) && \
                                           !(DT_SAME_NODE(PARTITION_MTD(n), PARTITION_MTD(m))))
