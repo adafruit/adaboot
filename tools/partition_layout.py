@@ -160,6 +160,12 @@ def load_boards_manifest():
             # this registry stay in sync, but the planner does not own their
             # (hand-maintained, mapped-partition) layout.
             "mcuboot": entry.get("mcuboot", True),
+            # A mcuboot board whose partition map the planner cannot make
+            # (say, a flash device that is part of an SD card, laid out by
+            # the SoC's boot chain) is registered with planned = false: --fix leaves
+            # its hand-maintained dtsi alone, and --gen-list takes the
+            # slot geometry from that layout instead of planning one.
+            "planned": entry.get("planned", True),
             # Explicit bootloader partition size in KB. When set, the boot
             # partition is pinned to exactly this size (aligned up to the
             # erase-block size) instead of growing to the 128 KB floor.
@@ -2383,6 +2389,11 @@ def gen_all_sectors_conf():
             print(f"  Skipped {key} (cmake-only build failed; is the workspace set up?)",
                   file=sys.stderr)
             continue
+        if not entry["planned"]:
+            # Hand-maintained layout: its partitions as built
+            gen_sectors_conf(key, conf_vendor, extract_flash_devices(edt, flash_overrides),
+                             nor_page_layout_kconfigs(edt))
+            continue
         split = plan_code_partition_split(
             edt,
             flash_overrides,
@@ -2651,6 +2662,14 @@ def main():
             f"{args.board} is a standalone board (mcuboot = false in boards.toml): "
             "its layout is a hand-maintained zephyr,mapped-partition overlay, not "
             f"something this planner emits. Edit dts/<vendor>/{args.board}.dtsi by hand.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if args.fix and not entry["planned"]:
+        print(
+            f"{args.board} has a hand-maintained layout (planned = false in "
+            f"boards.toml): edit dts/<vendor>/{args.board}.dtsi by hand, then "
+            "re-run --gen-list for its conf fragments.",
             file=sys.stderr,
         )
         sys.exit(1)
