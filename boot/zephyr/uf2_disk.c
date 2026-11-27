@@ -8,6 +8,8 @@
  * filesystem over USB Mass Storage.
  */
 
+#include <string.h>
+
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/disk.h>
 #include <zephyr/drivers/flash.h>
@@ -62,21 +64,12 @@ static struct uf2_disk_region *uf2_disk_region_of(const struct flash_area *fap)
 	return NULL;
 }
 
-/* Flash callbacks for write/erase (per-region flash_area as ctx) */
-static int uf2_flash_write(uint32_t offset, const void *data, uint32_t len,
-			   void *ctx)
+/* Write a payload (per-region flash_area as ctx) */
+static int uf2_flash_program(const struct flash_area *fap, uint32_t offset,
+			     void *data, uint32_t len)
 {
-	const struct flash_area *fap = ctx;
 	struct uf2_disk_region *r = uf2_disk_region_of(fap);
 	uint32_t aligned_len = len;
-	int rc;
-
-#ifdef CONFIG_MCUBOOT_INDICATION_LED
-	/* Flashing in progress: very fast blink, like the
-	 * STATE_WRITING_STARTED indicator of Adafruit_nRF52_Bootloader
-	 * and tinyuf2. */
-	io_led_blink(IO_LED_BLINK_WRITE_CYCLE_MS);
-#endif
 
 	/* UF2 payloads are 256 bytes, but the last block of a file can be a
 	 * shorter partial. Some flash drivers (e.g. Nordic RRAM) require both
@@ -98,7 +91,102 @@ static int uf2_flash_write(uint32_t offset, const void *data, uint32_t len,
 		}
 	}
 
-	rc = flash_area_write(fap, offset, data, aligned_len);
+	return flash_area_write(fap, offset, data, aligned_len);
+}
+
+#if CONFIG_MCUBOOT_UF2_WRITE_BUFFER_SIZE > 0
+/*
+ * Write coalescing. Payloads that follow each other are gathered in a
+ * buffer, and erases that follow each other in one pending range, so that
+ * the flash sees a few large operations instead of one per 256 byte
+ * payload. That matters where small writes are expensive, as on a flash
+ * on a disk, where each would be a read-modify-write of a sector. Both
+ * are flushed when the buffer is full, when a write or erase does not
+ * follow on, before any read, and when the transfer is complete, before
+ * it is acted on.
+ */
+static struct {
+	const struct flash_area *fap;
+	uint32_t offset;
+	uint32_t len;
+	/* The pending erase */
+	const struct flash_area *erase_fap;
+	uint32_t erase_offset;
+	uint32_t erase_len;
+	/* Whole cache lines, for flash drivers that DMA */
+	uint8_t data[CONFIG_MCUBOOT_UF2_WRITE_BUFFER_SIZE] __aligned(64);
+} uf2_wbuf;
+
+static int uf2_flash_flush(void)
+{
+	int rc = 0;
+
+	/* The erase first: the buffered data may lie in the range it erases */
+	if (uf2_wbuf.erase_len > 0) {
+		rc = flash_area_erase(uf2_wbuf.erase_fap, uf2_wbuf.erase_offset,
+				      uf2_wbuf.erase_len);
+		uf2_wbuf.erase_len = 0;
+	}
+
+	if (rc == 0 && uf2_wbuf.len > 0) {
+		/* Zero padding, should the write be rounded up */
+		memset(&uf2_wbuf.data[uf2_wbuf.len], 0,
+		       sizeof(uf2_wbuf.data) - uf2_wbuf.len);
+		rc = uf2_flash_program(uf2_wbuf.fap, uf2_wbuf.offset,
+				       uf2_wbuf.data, uf2_wbuf.len);
+	}
+	uf2_wbuf.len = 0;
+
+	return rc;
+}
+#else
+static int uf2_flash_flush(void)
+{
+	return 0;
+}
+#endif
+
+/* Flash callbacks for write/erase (per-region flash_area as ctx) */
+static int uf2_flash_write(uint32_t offset, const void *data, uint32_t len,
+			   void *ctx)
+{
+	const struct flash_area *fap = ctx;
+	struct uf2_disk_region *r = uf2_disk_region_of(fap);
+	int rc;
+
+#ifdef CONFIG_MCUBOOT_INDICATION_LED
+	/* Flashing in progress: very fast blink, like the
+	 * STATE_WRITING_STARTED indicator of Adafruit_nRF52_Bootloader
+	 * and tinyuf2. */
+	io_led_blink(IO_LED_BLINK_WRITE_CYCLE_MS);
+#endif
+
+#if CONFIG_MCUBOOT_UF2_WRITE_BUFFER_SIZE > 0
+	if (uf2_wbuf.len > 0 &&
+	    (fap != uf2_wbuf.fap || offset != uf2_wbuf.offset + uf2_wbuf.len ||
+	     uf2_wbuf.len + len > sizeof(uf2_wbuf.data))) {
+		rc = uf2_flash_flush();
+		if (rc != 0) {
+			return rc;
+		}
+	}
+	if (len <= sizeof(uf2_wbuf.data)) {
+		if (uf2_wbuf.len == 0) {
+			uf2_wbuf.fap = fap;
+			uf2_wbuf.offset = offset;
+		}
+		memcpy(&uf2_wbuf.data[uf2_wbuf.len], data, len);
+		uf2_wbuf.len += len;
+		rc = uf2_wbuf.len == sizeof(uf2_wbuf.data) ? uf2_flash_flush() : 0;
+	} else {
+		rc = uf2_flash_flush();
+		if (rc == 0) {
+			rc = uf2_flash_program(fap, offset, (void *)data, len);
+		}
+	}
+#else
+	rc = uf2_flash_program(fap, offset, (void *)data, len);
+#endif
 	if (rc == 0 && r != NULL) {
 		r->bytes_written += len;
 	}
@@ -110,7 +198,26 @@ static int uf2_flash_erase(uint32_t offset, uint32_t len, void *ctx)
 {
 	const struct flash_area *fap = ctx;
 
+#if CONFIG_MCUBOOT_UF2_WRITE_BUFFER_SIZE > 0
+	if (uf2_wbuf.erase_len > 0 && fap == uf2_wbuf.erase_fap &&
+	    offset == uf2_wbuf.erase_offset + uf2_wbuf.erase_len &&
+	    uf2_wbuf.erase_len + len <= sizeof(uf2_wbuf.data)) {
+		uf2_wbuf.erase_len += len;
+		return 0;
+	}
+
+	int rc = uf2_flash_flush();
+
+	if (rc == 0) {
+		uf2_wbuf.erase_fap = fap;
+		uf2_wbuf.erase_offset = offset;
+		uf2_wbuf.erase_len = len;
+	}
+
+	return rc;
+#else
 	return flash_area_erase(fap, offset, len);
+#endif
 }
 
 /* Flash read callback for CURRENT.UF2 (reads from flash device) */
@@ -118,6 +225,11 @@ static int uf2_flash_read(uint32_t offset, void *data, uint32_t len,
 			  void *ctx)
 {
 	const struct device *flash_dev = ctx;
+	int rc = uf2_flash_flush();
+
+	if (rc != 0) {
+		return rc;
+	}
 
 	return flash_read(flash_dev, offset, data, len);
 }
@@ -160,6 +272,18 @@ static int uf2_disk_access_write(struct disk_info *disk, const uint8_t *buf,
 			return rc;
 		}
 	}
+
+	/* A complete transfer is acted on (rebooted into) right away: its
+	 * last payloads must be in flash by then */
+	if (uf2_is_complete(&uf2_state_buf.state)) {
+		int rc = uf2_flash_flush();
+
+		if (rc != 0) {
+			BOOT_LOG_ERR("UF2 flush error: %d", rc);
+			return rc;
+		}
+	}
+
 	return 0;
 }
 
@@ -473,6 +597,7 @@ bool uf2_disk_is_registered(void)
 
 void uf2_disk_close(void)
 {
+	(void)uf2_flash_flush();
 	disk_access_unregister(&uf2_disk_info);
 	disk_registered = false;
 

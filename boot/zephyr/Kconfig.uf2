@@ -104,6 +104,18 @@ config MCUBOOT_UF2_MAX_BLOCKS
 	  Each block carries 256 bytes, so 4096 blocks = 1 MB.
 	  The block tracking bitmap uses MAX_BLOCKS/8 bytes of RAM.
 
+config MCUBOOT_UF2_WRITE_BUFFER_SIZE
+	int "Write coalescing buffer size (bytes)"
+	default 0
+	help
+	  If not 0, UF2 payloads that follow each other are gathered in a
+	  buffer of this many bytes, and erases that follow each other into
+	  one of up to this size, so that the flash sees a few large writes
+	  and erases instead of one per 256 byte payload. Worth it where
+	  small writes are expensive, such as a flash on an SD card. The
+	  buffer is flushed when full, when a write does not follow on,
+	  before reads, and when the transfer is complete.
+
 menu "Writable partitions"
 
 config MCUBOOT_UF2_WRITABLE_STORAGE
